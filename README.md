@@ -8,7 +8,7 @@ The core loop is **choose Audio or Video → Record → Stop → automatic playb
 
 This repository contains an **early prototype**, not a completed implementation of the plan. The source includes audio/video capture, play-once playback with optional looping and a seekable timeline, microphone selection, camera switching, and export. Debug simulator and unsigned Release device builds now pass with Xcode 27.0. Unit/integration playback tests and the timeline/Loop UI test pass on the simulator. Physical-device capture and export workflows remain unverified.
 
-Baseline work is in progress: a shared `Replay` scheme, Swift Testing and UI test targets, accessibility identifiers, and a focused SwiftLint configuration are present. The hardware-independent session core passes seven host-side tests but is not yet connected to the app. Replay now launches successfully on the iPhone 18 Pro simulator with iOS 27.0. PCM format tests, playback integration tests, the launch smoke test, and the timeline/Loop UI test pass on the simulator. Rolling capture and CI are not implemented.
+Baseline work is in progress: a shared `Replay` scheme, Swift Testing and UI test targets, accessibility identifiers, and a focused SwiftLint configuration are present. The session state machine now drives recording, playback, mode switching, and export. Operation IDs reject stale callbacks, and a previous take is replaced only after confirmed capture start. Replay now launches successfully on the iPhone 18 Pro simulator with iOS 27.0. PCM format tests, playback integration tests, the launch smoke test, and the timeline/Loop UI test pass on the simulator. Rolling capture and CI are not implemented.
 
 ## Product scope
 
@@ -57,14 +57,20 @@ Verified on **iPhone 18 Pro / iOS 27.0 (24A434)**. With Xcode 27, the simulator 
 | `Replay/PlaybackController.swift` | Playback readiness, play-once default, optional looping, seeking, time updates, and observer cleanup |
 | `ReplayTests/PlaybackControllerTests.swift` | Real fixture playback, looping, seeking, pause/seek races, and take replacement |
 | `Replay/PracticeView.swift` | Practice screen, media preview/player, controls, and Files export picker |
-| `Replay/PracticeSession.swift` | Explicit state transitions and operation IDs; not yet connected to hardware services |
+| `Replay/PracticeSession.swift` | State transitions, operation IDs, early Stop, cancellation, interruptions, and export ownership |
 | `ReplayTests/PracticeSessionTests.swift` | Early Stop, duplicate/stale callbacks, replacement failure, playback readiness, and export ownership |
 | `Replay/RecordingFormat.swift` | Validated sample-rate input for the prototype's lossless mono PCM configuration |
 | `ReplayTests/RecordingFormatTests.swift` | Hardware-rate compatibility and invalid-rate tests |
-| `ReplayUITests/LaunchTests.swift` | Launch smoke test for mode, Record, and Save controls |
+| `ReplayUITests/LaunchTests.swift` | Launch controls, timeline/Loop, native Files Save/Cancel, and failed replacement recovery |
 | `scripts/run-simulator.sh` | Build, install, and open the app in an available iPhone simulator |
-| `Replay/PracticeModel.swift` | Recording, playback, audio session, temporary storage, Photos export, and camera recorder |
+| `Replay/PracticeModel.swift` | Executes session effects, validates completed media, owns the current take, and associates exports with take IDs |
+| `Replay/PracticeServices.swift` | Native audio/camera adapters and Photos export; injectable capture/export boundaries for tests |
+| `ReplayTests/PracticeModelTests.swift` | Early Stop, failed replacement, interruption finalization, Save cancellation/retry, and exported-copy retention |
 | `Replay.xcodeproj/project.pbxproj` | iPhone app target and build settings |
+
+## Development workflow
+
+`main` is the default branch and contains the stable prototype. Develop on feature branches, commit completed changes after their checks, and open pull requests targeting `main`. See [AGENTS.md](AGENTS.md).
 
 ## Implementation roadmap
 
@@ -73,7 +79,7 @@ Follow **Steps 1–8 → Step 8A → Steps 9–12**. Existing prototype code is 
 | Step | Work |
 | --- | --- |
 | 1 | Establish Debug/Release builds, a shared scheme, unit/UI targets, SwiftLint, ignore rules, and reproducible setup |
-| 2 | Introduce explicit session states, serialized transitions, operation IDs, and deterministic test services |
+| 2 | Session states and operation IDs are connected to capture, playback, and export; deterministic capture services support simulator regression |
 | 3 | Implement one-take storage, safe replacement, recovery, an atomic manifest, and bounded cleanup |
 | 4 | Handle permissions, input selection, actual routes, and accessory changes |
 | 5 | Validate lossless audio capture, start/finalization results, elapsed time, and no app-added processing |
@@ -101,7 +107,7 @@ The coordinator should model ready, preparing, recording, finishing, replaying, 
 
 ### Decisions still needed
 
-The plan lists proposed defaults for minimum iOS version, relaunch retention, failed replacement, mode switching, camera selection, video sound, orientation/mirroring, audio format, saving during replay, background behavior, recording duration, and latency targets. Resolve these in Product design before dependent implementation; do not treat them as confirmed requirements.
+The prototype keeps iOS 17, its mono lossless PCM format, and temporary-only relaunch storage. It now preserves the previous take on start failure, pauses on mode changes and export, and avoids automatic resume after interruptions. Persistent relaunch retention, final camera/orientation/mirroring choices, accessory support, recording duration coverage, and latency targets still need product decisions and device validation.
 
 ## Validation plan
 
@@ -142,11 +148,13 @@ xcodebuild -project Replay.xcodeproj -scheme Replay -configuration Release -dest
 
 This small SwiftPM harness uses the installed Command Line Tools and their Swift Testing framework on macOS 14 or later. It runs the same session tests included in the iOS unit target without requiring a simulator, microphone, or camera. Format and UI tests remain exclusive to the Xcode project.
 
-Current evidence: **Debug simulator, unsigned Release device, and test-target builds pass**; **14 simulator unit/integration tests and both UI scenarios pass**; **7 host-side session tests also pass**; **SwiftLint 0.65.1 reports zero violations**; and project/scheme reference checks plus shell syntax checks pass. The simulator installation, launch, and Audio ready screen are verified. Hardware capture remains unverified. The existing camera recorder also produces Swift concurrency warnings; its queue/isolation model is scheduled for the capture-service work. The state core's proposed mode-switch and export-pause policies remain separate from the running prototype until product decisions and integration are complete.
+Current evidence: **Debug simulator, unsigned Release device, and test-target builds pass**; **23 simulator unit/integration tests and four UI scenarios pass**; **11 host-side session tests also pass**; **SwiftLint 0.65.1 reports zero violations**; and project/scheme reference checks plus shell syntax checks pass. Simulator launch, timeline playback, the generated recording-to-replay flow, native Files save/cancel, and failed-start recovery are verified. Capture tests inject deterministic callbacks and generated audio/video fixtures. Physical microphone/camera capture, accessory routing, real interruptions, and saving to Photos still require an iPhone. Camera-session work and start/stop callbacks are serialized. Mode changes pause replay and preserve the take; exports pause replay and remain paused after completion or cancellation. Transient permission/save-sheet inactivity does not end recording; backgrounding and interruptions stop capture safely without automatic resume.
 
 ### Preview playback controls
 
-Run `./scripts/run-simulator.sh --preview-audio --preview-paused` for a playback preview. Debug builds accept these launch arguments to load a generated 12-second silent clip. This lets you inspect the timeline and Loop switch without capturing microphone input. Normal launches still begin ready to record. Preview arguments are ignored in Release builds.
+Run `./scripts/run-simulator.sh --preview-audio --preview-paused` for a playback preview. Debug builds accept these launch arguments to load a generated 12-second silent clip. This lets you inspect the timeline and Loop switch without capturing microphone input. Normal launches still begin ready to record. `--fixture-capture` substitutes generated audio for capture in simulator workflow tests; it never requests microphone input. `--fail-second-start` injects one replacement failure in that harness. Preview arguments are ignored in Release builds.
+
+Files export remains paused after Save or Cancel. A new recording is disabled until the picker reports its result, and Saved is shown only for a confirmed success.
 
 Playback starts once by default. Loop starts off on each app launch and can be toggled for the current practice session. Scrubbing a paused take keeps it paused; scrubbing during playback resumes from the new position when released. Seeking to the end stops playback, and Play then restarts from the beginning.
 

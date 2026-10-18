@@ -5,7 +5,6 @@ import UIKit
 struct PracticeView: View {
     @StateObject private var model = PracticeModel()
     @Environment(\.scenePhase) private var scenePhase
-    @State private var exporting = false
 
     var body: some View {
         NavigationStack {
@@ -38,8 +37,8 @@ struct PracticeView: View {
                                 ProgressView("Preparing replay")
                             }
                         }
-                    } else if model.mode == .video && model.cameraReady {
-                        CameraPreview(session: model.camera.session)
+                    } else if model.mode == .video && model.cameraReady, let camera = model.cameraSession {
+                        CameraPreview(session: camera)
                     } else {
                         VStack(spacing: 16) {
                             Image(systemName: model.mode == .audio ? "waveform" : "video")
@@ -57,7 +56,7 @@ struct PracticeView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 24))
 
                 if model.player != nil {
-                    PlaybackControls(playback: model.playback)
+                    PlaybackControls(playback: model.playback, togglePlayback: model.togglePlayback)
                         .disabled(model.recording || model.busy)
                 }
 
@@ -83,11 +82,11 @@ struct PracticeView: View {
                     Color.clear.frame(width: 64, height: 44).accessibilityHidden(true)
                     Spacer()
                     Button {
-                        Task { await model.toggleRecording() }
+                        model.toggleRecording()
                     } label: {
                         ZStack {
                             Circle().stroke(.red, lineWidth: 3).frame(width: 80, height: 80)
-                            if model.recording {
+                            if model.session.canStop {
                                 RoundedRectangle(cornerRadius: 6).fill(.red).frame(width: 30, height: 30)
                             } else {
                                 Circle().fill(.red).frame(width: 66, height: 66)
@@ -95,16 +94,11 @@ struct PracticeView: View {
                         }
                     }
                     .accessibilityIdentifier("practice.record")
-                    .accessibilityLabel(model.recording ? "Stop and replay" : "Record new take")
-                    .disabled(model.busy)
+                    .accessibilityLabel(model.recordLabel)
+                    .disabled(!model.session.canRecord && !model.session.canStop)
                     Spacer()
                     Button {
-                        if model.takeMode == .video {
-                            Task { await model.saveVideo() }
-                        } else {
-                            model.playback.pause()
-                            exporting = true
-                        }
+                        model.save()
                     } label: {
                         VStack(spacing: 4) {
                             Image(systemName: model.saved ? "checkmark" : "square.and.arrow.down")
@@ -112,27 +106,33 @@ struct PracticeView: View {
                         }.frame(width: 64, height: 44)
                     }
                     .accessibilityIdentifier("practice.save")
-                    .disabled(model.takeURL == nil || model.recording || model.busy || model.saved)
+                    .accessibilityLabel(model.saved ? "Saved" : "Save")
+                    .disabled(!model.canSave)
                 }
-                Text(model.recording ? "Tap stop to replay" : model.takeURL == nil ? "Only your latest take stays here" : (model.playback.loopEnabled ? "Loop is on" : "Plays once · Turn on Loop to repeat"))
+                Text(model.status)
                     .font(.footnote).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("practice.status")
             }
             .padding()
             .navigationTitle("Replay")
             .navigationBarTitleDisplayMode(.inline)
             .task { await model.prepare() }
-            .onChange(of: model.mode) { _, _ in Task { await model.prepare() } }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { model.suspend() }
-                else { Task { await model.prepare() } }
+                if phase == .background { model.suspend() }
+                else if phase == .active { Task { await model.resume() } }
             }
-            .sheet(isPresented: $exporting) {
-                if let url = model.takeURL {
-                    AudioExporter(url: url) { model.saved = true }
+            .sheet(item: $model.audioExport) { request in
+                AudioExporter(url: request.take.url) { outcome in
+                    model.completeAudioExport(id: request.id, outcome: outcome)
                 }
+                // Files can dismiss before its delegate reports success. Use its explicit Cancel action.
+                .interactiveDismissDisabled()
             }
-            .alert("Replay", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
-                Button("OK", role: .cancel) { model.message = nil }
+            .alert("Replay", isPresented: Binding(get: { model.message != nil }, set: { presented in
+                // SwiftUI can write this binding while updating the alert hierarchy.
+                if !presented, model.message != nil { Task { @MainActor in model.dismissError() } }
+            })) {
+                Button("OK", role: .cancel) { model.dismissError() }
             } message: { Text(model.message ?? "") }
         }
     }
@@ -140,8 +140,8 @@ struct PracticeView: View {
 
 struct AudioExporter: UIViewControllerRepresentable {
     let url: URL
-    let onSave: () -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onSave: onSave) }
+    let onComplete: (ExportOutcome) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onComplete: onComplete) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
         picker.delegate = context.coordinator
@@ -149,10 +149,13 @@ struct AudioExporter: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onSave: () -> Void
-        init(onSave: @escaping () -> Void) { self.onSave = onSave }
+        let onComplete: (ExportOutcome) -> Void
+        init(onComplete: @escaping (ExportOutcome) -> Void) { self.onComplete = onComplete }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            if !urls.isEmpty { onSave() }
+            onComplete(urls.isEmpty ? .cancelled : .saved)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onComplete(.cancelled)
         }
     }
 }
@@ -175,6 +178,7 @@ struct CameraPreview: UIViewRepresentable {
 
 struct PlaybackControls: View {
     @ObservedObject var playback: PlaybackController
+    let togglePlayback: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
@@ -200,7 +204,7 @@ struct PlaybackControls: View {
             .foregroundStyle(.secondary)
 
             HStack {
-                Button(action: playback.togglePlayback) {
+                Button(action: togglePlayback) {
                     Label(playback.isPlaying ? "Pause" : "Play", systemImage: playback.isPlaying ? "pause.fill" : "play.fill")
                         .frame(minWidth: 80, minHeight: 44)
                 }

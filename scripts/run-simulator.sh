@@ -34,5 +34,5 @@ xcodebuild -project Replay.xcodeproj -scheme Replay -configuration Debug \
     -destination "platform=iOS Simulator,id=$simulator_id" \
     -derivedDataPath build/DerivedData build 2>&1 | tee build/debug-build.log
 xcrun simctl install "$simulator_id" build/DerivedData/Build/Products/Debug-iphonesimulator/Replay.app
-xcrun simctl launch "$simulator_id" com.example.ReplayPractice "$@"
+xcrun simctl launch --terminate-running-process "$simulator_id" com.example.ReplayPractice "$@"
 printf 'Replay is running on simulator %s\n' "$simulator_id"

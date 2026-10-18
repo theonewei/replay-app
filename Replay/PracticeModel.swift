@@ -1,281 +1,365 @@
 import AVFoundation
 import Combine
-import Photos
 import UIKit
+
+struct RecordedTake: Equatable {
+    let id: UUID
+    let mode: RecordingMode
+    let url: URL
+}
+
+struct AudioExportRequest: Identifiable {
+    let id: UUID
+    let take: RecordedTake
+}
+
+enum ExportOutcome { case saved, cancelled }
 
 @MainActor
 final class PracticeModel: ObservableObject {
-    enum Mode { case audio, video }
-    @Published var mode: Mode = .audio
-    @Published var takeMode: Mode = .audio
-    @Published var recording = false
-    @Published var busy = false
-    @Published var saved = false
-    @Published var cameraReady = false
+    typealias Mode = RecordingMode
+    @Published private(set) var session = PracticeSession()
+    @Published private(set) var take: RecordedTake?
+    @Published private(set) var cameraReady = false
+    @Published private(set) var inputs: [AVAudioSessionPortDescription] = []
+    @Published private(set) var savedTakeID: UUID?
     @Published var message: String?
-    let playback = PlaybackController()
-    var player: AVPlayer? { playback.player }
-    @Published var takeURL: URL?
-    @Published var inputs: [AVAudioSessionPortDescription] = []
+    @Published var audioExport: AudioExportRequest?
     @Published var selectedInput: String?
-    let camera = CameraRecorder()
-    private var recorder: AVAudioRecorder?
-    private var playbackObservation: AnyCancellable?
-    private var interruptionObserver: NSObjectProtocol?
-    private var pendingURL: URL?
+    let playback = PlaybackController()
+    private let capture: any PracticeCapturing
+    private let videoExport: any VideoExporting
+    private let folder: URL
+    private var pending: [UUID: RecordedTake] = [:]
+    private var finalizing = Set<UUID>()
+    private var startTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
+    private var previewGeneration = UUID()
+    private var subscriptions = Set<AnyCancellable>()
+    private var readinessSubscription: AnyCancellable?
+    private var observers: [NSObjectProtocol] = []
     private var position: AVCaptureDevice.Position = .front
-    private let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ReplayTakes", isDirectory: true)
 
-    var inputName: String {
-        inputs.first { $0.uid == selectedInput }?.portName ?? "System microphone"
+    var mode: Mode {
+        get { session.selectedMode }
+        set {
+            send(.selectMode(newValue))
+            Task { await prepare() }
+        }
     }
+    var takeMode: Mode { take?.mode ?? mode }
+    var takeURL: URL? { take?.url }
+    var player: AVPlayer? { take?.mode == mode ? playback.player : nil }
+    var cameraSession: AVCaptureSession? { capture.cameraSession }
+    var recording: Bool { session.state == .recording }
+    var busy: Bool { !session.canChangeMode }
+    var canSave: Bool {
+        take?.mode == mode && (session.state == .paused || session.state == .replaying) && !saved
+    }
+    var saved: Bool { take != nil && savedTakeID == take?.id }
+    var recordLabel: String {
+        if session.state == .preparing { return "Cancel or stop recording" }
+        return recording ? "Stop and replay" : "Record new take"
+    }
+    var status: String {
+        switch session.state {
+        case .preparing: return "Preparing recording…"
+        case .recording: return "Tap stop to replay"
+        case .finishing: return "Preparing replay…"
+        case .exporting: return "Saving…"
+        default: return take == nil ? "Only your latest take stays here" : playback.loopEnabled ? "Loop is on" : "Plays once · Turn on Loop to repeat"
+        }
+    }
+    var inputName: String { inputs.first { $0.uid == selectedInput }?.portName ?? "System microphone" }
 
-    init() {
-        playbackObservation = playback.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
+    init(capture: (any PracticeCapturing)? = nil, videoExport: (any VideoExporting)? = nil, storage: URL? = nil) {
+        #if DEBUG
+        self.capture = capture ?? (ProcessInfo.processInfo.arguments.contains("--fixture-capture") ? FixtureCaptureDriver() : SystemCaptureDriver())
+        #else
+        self.capture = capture ?? SystemCaptureDriver()
+        #endif
+        self.videoExport = videoExport ?? PhotosExporter()
+        folder = storage ?? FileManager.default.temporaryDirectory.appendingPathComponent("ReplayTakes", isDirectory: true)
+        // Retain the prototype's existing relaunch policy; injected test stores are isolated.
+        if storage == nil { try? FileManager.default.removeItem(at: folder) }
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        catch { message = error.localizedDescription }
+        playback.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
+        playback.$isPlaying.dropFirst().sink { [weak self] playing in
+            guard let self, !playing, let take = self.take else { return }
+            self.send(.playbackStopped(take.id))
+        }.store(in: &subscriptions)
+        playback.onError = { [weak self] message in
+            guard let self, let take = self.take else { return }
+            self.send(.playbackFailed(take.id, message))
+            self.message = message
         }
-        playback.onError = { [weak self] in self?.message = $0 }
-        // The app owns this folder exclusively. Unsaved takes do not survive a launch.
-        try? FileManager.default.removeItem(at: folder)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.suspend() }
-        }
+        observeInterruptions()
     }
 
     func prepare() async {
-        guard !recording, !busy, player == nil else { return }
+        guard session.canChangeMode else { return }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--preview-audio") {
+        if take == nil, ProcessInfo.processInfo.arguments.contains("--preview-audio") {
             do {
-                replay(try PreviewMedia.makeAudio(in: folder),
-                       autoplay: !ProcessInfo.processInfo.arguments.contains("--preview-paused"))
-            }
-            catch { message = error.localizedDescription }
+                let preview = RecordedTake(id: UUID(), mode: .audio, url: try PreviewMedia.makeAudio(in: folder))
+                take = preview
+                send(.loadTake(UUID(), takeID: preview.id, mode: .audio,
+                               autoplay: !ProcessInfo.processInfo.arguments.contains("--preview-paused")))
+            } catch { message = error.localizedDescription }
             return
         }
         #endif
-        busy = true
-        defer { busy = false }
-        do {
-            if mode == .audio {
-                await camera.stopSession()
-                cameraReady = false
-                try configureInput()
-            } else {
-                guard await AVCaptureDevice.requestAccess(for: .video) else {
-                    throw PracticeError("Allow camera access in Settings to record video.")
+        previewTask?.cancel()
+        previewGeneration = UUID()
+        let generation = previewGeneration
+        let mode = self.mode
+        previewTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                if mode == .video && self.take?.mode != .video {
+                    try await self.capture.prepareVideo(position: self.position)
+                    guard !Task.isCancelled, self.previewGeneration == generation, self.session.canChangeMode else { return }
+                    self.cameraReady = true
+                } else {
+                    await self.capture.stopPreview()
+                    guard !Task.isCancelled, self.previewGeneration == generation else { return }
+                    self.cameraReady = false
                 }
-                try await camera.prepare(position: position)
-                cameraReady = true
+                self.refreshInputs()
+            } catch {
+                if !Task.isCancelled, self.previewGeneration == generation { self.message = error.localizedDescription }
             }
-        } catch { message = error.localizedDescription }
-    }
-
-    private func configureInput() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [])
-        try session.setActive(true)
-        inputs = session.availableInputs ?? []
-        let input = inputs.first { $0.uid == selectedInput }
-        if selectedInput != nil && input == nil { selectedInput = nil }
-        try session.setPreferredInput(input)
+        }
+        await previewTask?.value
     }
 
     func refreshInputs() {
-        // Switching to the recording category would interrupt replay, so refresh
-        // the full list at preparation and just inspect it while playing.
-        if player == nil { try? configureInput() }
+        guard player == nil else { return }
+        inputs = capture.inputs(prepare: session.state == .ready && mode == .audio)
     }
 
-    func toggleRecording() async {
-        guard !busy else { return }
-        if recording { stop(); return }
-        busy = true
-        defer { busy = false }
-        do {
-            guard await AVCaptureDevice.requestAccess(for: .audio) else {
-                throw PracticeError("Allow microphone access in Settings to record a take.")
-            }
-            if mode == .video {
-                guard await AVCaptureDevice.requestAccess(for: .video) else {
-                    throw PracticeError("Allow camera access in Settings to record video.")
+    func toggleRecording() {
+        if session.canStop { send(.stop) }
+        else if session.canRecord { send(.record(UUID())) }
+    }
+
+    func togglePlayback() {
+        if session.state == .replaying { send(.pause) }
+        else if session.state == .paused { send(.play) }
+    }
+
+    func save() {
+        guard canSave else { return }
+        send(.export(UUID()))
+    }
+
+    func completeAudioExport(id: UUID, outcome: ExportOutcome) {
+        completeExport(id: id, result: .success(outcome))
+    }
+
+    private func completeExport(id: UUID, result: Result<ExportOutcome, Error>) {
+        guard session.state == .exporting, session.operationID == id, let take,
+              session.takeID == take.id else { return }
+        switch result {
+        case .success(let outcome):
+            if case .saved = outcome { savedTakeID = take.id }
+            send(.exportFinished(id))
+        case .failure(let error):
+            send(.failure(id, error.localizedDescription))
+            message = error.localizedDescription
+        }
+        audioExport = nil
+    }
+
+    func dismissError() {
+        message = nil
+        send(.dismissError)
+    }
+
+    private func send(_ event: PracticeSession.Event) {
+        let effects = session.handle(event)
+        UIApplication.shared.isIdleTimerDisabled = session.state == .recording
+        for effect in effects { perform(effect) }
+    }
+
+    private func perform(_ effect: PracticeSession.Effect) {
+        switch effect {
+        case .startCapture(let id, let mode):
+            previewTask?.cancel()
+            previewGeneration = UUID()
+            let url = folder.appendingPathComponent("Take-\(id.uuidString).\(mode == .audio ? "wav" : "mov")")
+            pending[id] = RecordedTake(id: id, mode: mode, url: url)
+            startTask = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.capture.start(id: id, mode: mode, url: url, inputID: self.selectedInput, position: self.position,
+                        started: { [weak self] in
+                            guard let self, self.session.operationID == id else { return }
+                            self.send(.captureStarted(id))
+                            self.inputs = self.capture.inputs(prepare: false)
+                        }, finished: { [weak self] result in
+                            Task { @MainActor [weak self] in await self?.captureFinished(id: id, result: result) }
+                        })
+                } catch {
+                    self.deletePending(id)
+                    guard self.session.operationID == id else { return }
+                    self.send(.failure(id, error.localizedDescription))
+                    self.message = error.localizedDescription
                 }
             }
-            playback.pause()
-            if mode == .audio {
-                await camera.stopSession()
-                try configureInput()
-            } else {
-                try await camera.prepare(position: position)
-                cameraReady = true
+        case .stopCapture(let id): capture.stop(id: id)
+        case .cancelCapture(let id):
+            startTask?.cancel()
+            capture.stop(id: id)
+        case .replaceTake(let previous):
+            readinessSubscription = nil
+            playback.clear()
+            if let old = take, old.id == previous {
+                take = nil
+                deleteFile(old.url)
             }
-            let url = folder.appendingPathComponent("Take-\(UUID().uuidString).\(mode == .audio ? "wav" : "mov")")
-            if mode == .audio {
-                let settings = try RecordingFormat.settings(sampleRate: AVAudioSession.sharedInstance().sampleRate)
-                let newRecorder = try AVAudioRecorder(url: url, settings: settings)
-                guard newRecorder.record() else { throw PracticeError("Recording could not start. Please try again.") }
-                recorder = newRecorder
-            } else {
-                camera.record(to: url) { [weak self] result in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.recording = false
-                        self.busy = true
-                        await self.camera.stopSession()
-                        self.cameraReady = false
-                        switch result {
-                        case .success(let url): self.replay(url)
-                        case .failure(let error):
-                            self.message = error.localizedDescription
-                            if let pending = self.pendingURL { try? FileManager.default.removeItem(at: pending) }
-                        }
-                        self.pendingURL = nil
-                        self.busy = false
+            savedTakeID = nil
+        case .preparePlayback(let id, let takeID):
+            guard let take, take.id == takeID else { return }
+            do {
+                let audio = AVAudioSession.sharedInstance()
+                try audio.setCategory(.playback)
+                try audio.setActive(true)
+                playback.load(take.url, autoplay: false)
+                // Prefix the next readiness event to this operation and this take.
+                readinessSubscription = playback.$isReady.dropFirst().filter { $0 }.prefix(1).sink { [weak self] _ in
+                    guard let self, self.session.operationID == id, self.take?.id == takeID else { return }
+                    Task { @MainActor [weak self] in
+                        guard let self, self.session.operationID == id, self.take?.id == takeID else { return }
+                        if UIApplication.shared.applicationState != .active { self.send(.suspend) }
+                        self.send(.playbackReady(id))
                     }
                 }
+            } catch {
+                send(.failure(id, error.localizedDescription))
+                message = error.localizedDescription
             }
-            clearTake()
-            takeMode = mode
-            pendingURL = url
-            recording = true
-            saved = false
-            UIApplication.shared.isIdleTimerDisabled = true
-        } catch { message = error.localizedDescription }
-    }
-
-    private func stop() {
-        guard recording else { return }
-        UIApplication.shared.isIdleTimerDisabled = false
-        if takeMode == .audio {
-            recorder?.stop()
-            recorder = nil
-            recording = false
-            if let url = pendingURL { replay(url) }
-            pendingURL = nil
-        } else {
-            busy = true
-            camera.stopRecording()
+        case .play(let id):
+            guard take?.id == id else { return }
+            do {
+                let audio = AVAudioSession.sharedInstance()
+                if audio.category != .playback || audio.mode != .default { try audio.setCategory(.playback, mode: .default) }
+                try audio.setActive(true)
+                playback.play()
+            } catch {
+                send(.playbackFailed(id, error.localizedDescription))
+                message = error.localizedDescription
+            }
+        case .pause(let id):
+            guard take?.id == id else { return }
+            playback.pause()
+        case .export(let id, let takeID):
+            guard let take, take.id == takeID else { return }
+            if take.mode == .audio {
+                audioExport = AudioExportRequest(id: id, take: take)
+            } else {
+                Task { [weak self] in
+                    guard let self else { return }
+                    do {
+                        try await self.videoExport.save(take.url)
+                        self.completeExport(id: id, result: .success(.saved))
+                    } catch { self.completeExport(id: id, result: .failure(error)) }
+                }
+            }
         }
     }
 
-    private func replay(_ url: URL, autoplay: Bool = true) {
-        takeURL = url
+    private func captureFinished(id: UUID, result: Result<URL, Error>) async {
+        guard let pendingTake = pending[id], !finalizing.contains(id) else { return }
+        guard session.operationID == id else { deletePending(id); return }
+        finalizing.insert(id)
+        defer { finalizing.remove(id) }
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default)
-            try session.setActive(true)
-            playback.load(url, autoplay: autoplay && UIApplication.shared.applicationState == .active)
-        } catch { message = error.localizedDescription }
+            let url = try result.get()
+            guard url == pendingTake.url else { throw PracticeError("The recorder returned an unexpected file.") }
+            let asset = AVURLAsset(url: url)
+            let duration = try await asset.load(.duration).seconds
+            guard duration.isFinite, duration > 0 else { throw PracticeError("The recording is empty. Please try again.") }
+            let tracks = try await asset.loadTracks(withMediaType: pendingTake.mode == .audio ? .audio : .video)
+            guard !tracks.isEmpty else { throw PracticeError("The recording is missing its media track. Please try again.") }
+            guard session.operationID == id else { deletePending(id); return }
+            guard session.state == .recording || session.state == .finishing else {
+                throw PracticeError("Recording could not confirm its start. Please try again.")
+            }
+            take = pendingTake
+            pending[id] = nil
+            cameraReady = false
+            send(.captureFinished(id, takeID: pendingTake.id))
+        } catch {
+            deletePending(id)
+            guard session.operationID == id else { return }
+            send(.failure(id, error.localizedDescription))
+            message = error.localizedDescription
+        }
     }
 
-    private func clearTake() {
-        playback.clear()
-        if let url = takeURL { try? FileManager.default.removeItem(at: url) }
-        takeURL = nil
+    private func deletePending(_ id: UUID) {
+        if let pendingTake = pending.removeValue(forKey: id) { deleteFile(pendingTake.url) }
+    }
+
+    private func deleteFile(_ url: URL) {
+        guard url.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        do { try FileManager.default.removeItem(at: url) }
+        catch { message = "A temporary recording could not be removed: \(error.localizedDescription)" }
     }
 
     func flipCamera() async {
+        guard session.canChangeMode else { return }
         position = position == .front ? .back : .front
         await prepare()
     }
 
     func suspend() {
-        if recording { stop() }
-        playback.pause()
-        UIApplication.shared.isIdleTimerDisabled = false
+        previewTask?.cancel()
+        previewGeneration = UUID()
+        send(.suspend)
     }
 
-    func saveVideo() async {
-        guard let url = takeURL, !busy else { return }
-        playback.pause()
-        busy = true
-        defer { busy = false }
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard status == .authorized || status == .limited else {
-            message = "Allow Photos access in Settings to save this video. Your take is still available here."
-            return
-        }
-        do {
-            try await PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+    func resume() async {
+        send(.resume)
+        await prepare()
+    }
+
+    private func observeInterruptions() {
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
+            let began = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue
+            Task { @MainActor [weak self] in
+                if began { self?.suspend() }
+                else if UIApplication.shared.applicationState == .active { await self?.resume() }
             }
-            saved = true
-        } catch { message = error.localizedDescription }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notification in
+            let removed = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
+            guard removed else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if self.recording {
+                    self.send(.suspend)
+                    self.send(.resume)
+                    self.message = "The audio device was disconnected. Recording has stopped."
+                } else { self.send(.pause) }
+                self.refreshInputs()
+            }
+        })
+    }
+
+    isolated deinit {
+        startTask?.cancel()
+        previewTask?.cancel()
+        if let id = session.operationID { capture.stop(id: id) }
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        UIApplication.shared.isIdleTimerDisabled = false
     }
 }
 
 struct PracticeError: LocalizedError {
     let errorDescription: String?
     init(_ text: String) { errorDescription = text }
-}
-
-final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
-    let session = AVCaptureSession()
-    private let queue = DispatchQueue(label: "Replay.camera")
-    private let output = AVCaptureMovieFileOutput()
-    private var completion: ((Result<URL, Error>) -> Void)?
-
-    func prepare(position: AVCaptureDevice.Position) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            queue.async {
-                do {
-                    if self.session.isRunning { self.session.stopRunning() }
-                    self.session.beginConfiguration()
-                    do {
-                        self.session.sessionPreset = .high
-                        for input in self.session.inputs { self.session.removeInput(input) }
-                        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
-                            throw PracticeError("No camera is available on this device.")
-                        }
-                        let input = try AVCaptureDeviceInput(device: device)
-                        guard self.session.canAddInput(input) else { throw PracticeError("Cannot access the camera.") }
-                        self.session.addInput(input)
-                        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
-                           let mic = AVCaptureDevice.default(for: .audio) {
-                            let audio = try AVCaptureDeviceInput(device: mic)
-                            if self.session.canAddInput(audio) { self.session.addInput(audio) }
-                        }
-                        if !self.session.outputs.contains(self.output) {
-                            guard self.session.canAddOutput(self.output) else { throw PracticeError("Cannot record video on this device.") }
-                            self.session.addOutput(self.output)
-                        }
-                        if let connection = self.output.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
-                            connection.videoRotationAngle = 90
-                        }
-                        self.session.commitConfiguration()
-                    } catch {
-                        self.session.commitConfiguration()
-                        throw error
-                    }
-                    self.session.startRunning()
-                    continuation.resume()
-                } catch { continuation.resume(throwing: error) }
-            }
-        }
-    }
-
-    func record(to url: URL, completion: @escaping (Result<URL, Error>) -> Void) {
-        queue.async {
-            self.completion = completion
-            self.output.startRecording(to: url, recordingDelegate: self)
-        }
-    }
-    func stopRecording() { queue.async { if self.output.isRecording { self.output.stopRecording() } } }
-    func stopSession() async {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                if self.session.isRunning { self.session.stopRunning() }
-                continuation.resume()
-            }
-        }
-    }
-    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo url: URL, from connections: [AVCaptureConnection], error: Error?) {
-        queue.async {
-            if let error, (error as NSError).userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool != true {
-                self.completion?(.failure(error))
-            } else { self.completion?(.success(url)) }
-            self.completion = nil
-        }
-    }
 }

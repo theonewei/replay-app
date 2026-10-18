@@ -44,4 +44,63 @@ final class LaunchTests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 5), .completed)
         XCTAssertEqual(play.label, "Play")
     }
+
+    func testRecordingSaveCancellationAndFailedReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-capture", "--fail-second-start"]
+        app.launch()
+        let record = app.buttons["practice.record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        record.tap()
+        let recording = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Stop and replay'"), object: record)
+        XCTAssertEqual(XCTWaiter.wait(for: [recording], timeout: 5), .completed)
+        record.tap()
+        let play = app.buttons["playback.playPause"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: play)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+        if play.label == "Pause" { play.tap() }
+        app.sliders["playback.timeline"].adjust(toNormalizedSliderPosition: 0.4)
+        app.buttons["practice.save"].tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        if !cancel.waitForExistence(timeout: 2) {
+            app.navigationBars.buttons.firstMatch.tap()
+        }
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+        cancel.tap()
+        let saveReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: app.buttons["practice.save"])
+        XCTAssertEqual(XCTWaiter.wait(for: [saveReady], timeout: 5), .completed)
+        XCTAssertEqual(play.label, "Play")
+        record.tap()
+        XCTAssertTrue(app.alerts["Replay"].waitForExistence(timeout: 5))
+        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.sliders["playback.timeline"].exists)
+        XCTAssertEqual(app.staticTexts["playback.duration"].label, "0:12")
+        XCTAssertTrue(app.buttons["practice.save"].isEnabled)
+    }
+
+    func testRecordingCanSaveThroughFiles() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-capture"]
+        app.launch()
+        let record = app.buttons["practice.record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        record.tap()
+        let recording = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Stop and replay'"), object: record)
+        XCTAssertEqual(XCTWaiter.wait(for: [recording], timeout: 5), .completed)
+        record.tap()
+        let save = app.buttons["practice.save"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+        save.tap()
+        let filesSave = app.navigationBars.buttons["Save"].firstMatch
+        XCTAssertTrue(filesSave.waitForExistence(timeout: 10))
+        filesSave.tap()
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Saved'"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 10), .completed)
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(app.sliders["playback.timeline"].exists)
+        XCTAssertEqual(app.buttons["playback.playPause"].label, "Play")
+    }
 }
