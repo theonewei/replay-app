@@ -32,11 +32,17 @@ struct PracticeSession {
         case export(UUID)
         case exportFinished(UUID)
         case dismissError
+        case playbackStopped(UUID)
+        case playbackFailed(UUID, String)
+        case suspend
+        case resume
+        case loadTake(UUID, takeID: UUID, mode: RecordingMode, autoplay: Bool)
     }
 
     enum Effect: Equatable {
         case startCapture(UUID, RecordingMode)
         case stopCapture(UUID)
+        case cancelCapture(UUID)
         case replaceTake(UUID?)
         case preparePlayback(UUID, UUID)
         case play(UUID)
@@ -52,6 +58,8 @@ struct PracticeSession {
     private var captureMode: RecordingMode?
     private var stopQueued = false
     private var waitingForPlayback = false
+    private var autoplay = true
+    private(set) var isActive = true
 
     var canChangeMode: Bool {
         switch state {
@@ -60,7 +68,7 @@ struct PracticeSession {
         }
     }
 
-    var canRecord: Bool { canChangeMode }
+    var canRecord: Bool { canChangeMode && isActive }
 
     var canStop: Bool { state == .preparing || state == .recording }
 
@@ -72,6 +80,7 @@ struct PracticeSession {
             if let takeID { effects.append(.pause(takeID)) }
             operationID = id
             captureMode = selectedMode
+            autoplay = true
             stopQueued = false
             waitingForPlayback = false
             state = .preparing
@@ -109,8 +118,8 @@ struct PracticeSession {
                   let takeID else { return [] }
             waitingForPlayback = false
             operationID = nil
-            state = .replaying
-            return [.play(takeID)]
+            state = autoplay && isActive ? .replaying : .paused
+            return state == .replaying ? [.play(takeID)] : []
 
         case .failure(let id, let message):
             guard operationID == id else { return [] }
@@ -126,7 +135,7 @@ struct PracticeSession {
             return [.pause(takeID)]
 
         case .play:
-            guard state == .paused, takeMode == selectedMode, let takeID else { return [] }
+            guard state == .paused, isActive, takeMode == selectedMode, let takeID else { return [] }
             state = .replaying
             return [.play(takeID)]
 
@@ -138,7 +147,7 @@ struct PracticeSession {
             return effects
 
         case .export(let id):
-            guard (state == .replaying || state == .paused), let takeID else { return [] }
+            guard (state == .replaying || state == .paused), takeMode == selectedMode, let takeID else { return [] }
             state = .exporting
             operationID = id
             return [.pause(takeID), .export(id, takeID)]
@@ -148,6 +157,54 @@ struct PracticeSession {
             operationID = nil
             state = .paused
             return []
+
+        case .playbackStopped(let id):
+            guard takeID == id, state == .replaying else { return [] }
+            state = .paused
+            return []
+
+        case .playbackFailed(let id, let message):
+            guard takeID == id, state == .finishing || state == .replaying || state == .paused else { return [] }
+            operationID = nil
+            waitingForPlayback = false
+            state = .recoverableError(message)
+            return [.pause(id)]
+
+        case .suspend:
+            isActive = false
+            autoplay = false
+            switch state {
+            case .preparing:
+                guard let id = operationID else { return [] }
+                operationID = nil
+                stopQueued = false
+                state = takeID != nil && takeMode == selectedMode ? .paused : .ready
+                return [.cancelCapture(id)]
+            case .recording:
+                guard let id = operationID else { return [] }
+                state = .finishing
+                return [.stopCapture(id)]
+            case .replaying:
+                state = .paused
+                return takeID.map { [.pause($0)] } ?? []
+            default:
+                return takeID.map { [.pause($0)] } ?? []
+            }
+
+        case .resume:
+            isActive = true
+            return []
+
+        case .loadTake(let id, let take, let mode, let shouldAutoplay):
+            guard canRecord else { return [] }
+            selectedMode = mode
+            takeID = take
+            takeMode = mode
+            operationID = id
+            waitingForPlayback = true
+            autoplay = shouldAutoplay
+            state = .finishing
+            return [.preparePlayback(id, take)]
 
         case .dismissError:
             guard case .recoverableError = state else { return [] }
