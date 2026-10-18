@@ -82,7 +82,7 @@ Follow **Steps 1–8 → Step 8A → Steps 9–12**. Existing prototype code is 
 | 2 | Session states and operation IDs are connected to capture, playback, and export; deterministic capture services support simulator regression |
 | 3 | Implement one-take storage, safe replacement, recovery, an atomic manifest, and bounded cleanup |
 | 4 | Handle permissions, input selection, actual routes, and accessory changes |
-| 5 | Validate lossless audio capture, start/finalization results, elapsed time, and no app-added processing |
+| 5 | Validate lossless audio capture, start/finalization results, elapsed time, live audio visualization, and no app-added processing |
 | 6 | Readiness-aware autoplay, optional looping, pause, timeline seeking, and observer cleanup are implemented; device validation remains pending |
 | 7 | Verify camera preview, front/back capture, framing, orientation, sound, and asynchronous capture callbacks |
 | 8 | Integrate mode switching with one retained take and correct resource ownership |
@@ -91,6 +91,12 @@ Follow **Steps 1–8 → Step 8A → Steps 9–12**. Existing prototype code is 
 | 10 | Handle interruptions, lifecycle transitions, input loss, storage exhaustion, and resource failures |
 | 11 | Verify native UI, VoiceOver, Dynamic Type, appearance, and small-screen layout |
 | 12 | Complete regression, device/performance evidence, CI, and developer handoff |
+
+### Planned live audio visualization
+
+Show live audio bars or a waveform while recording audio, driven by actual microphone input. This is visual feedback and leaves the recorded sound unchanged. The exact presentation remains a design choice. Implement alongside audio capture (Step 5) and accessible recording controls (Step 11).
+
+Stop/reset the display when capture ends or fails, ignore stale updates, keep history and update frequency bounded, and respect Reduce Motion. Validate silence, quiet/loud input, interruptions, and repeated recordings. This feature is planned and is not yet implemented.
 
 ### Intended architecture
 
@@ -160,6 +166,6 @@ Playback starts once by default. Loop starts off on each app launch and can be t
 
 ## Source documents
 
-This README summarizes Isaac's second-brain note **Replay — Implementation and testing plan**, updated **October 10, 2026**, at `life/Replay/Implementation-plan.md`. Related notes are `life/Replay/Product-design.md` and `life/Replay/UI-design.md`. These documents live in the personal Obsidian vault and are not bundled with this repository. The October 17, 2026 request to play once by default with optional looping supersedes the original plan's automatic-repeat requirement.
+This README summarizes Isaac's second-brain note **Replay — Implementation and testing plan**, updated **October 18, 2026**, at `life/Replay/Implementation-plan.md`. Related notes are `life/Replay/Product-design.md` and `life/Replay/UI-design.md`. These documents live in the personal Obsidian vault and are not bundled with this repository. The October 17, 2026 request to play once by default with optional looping supersedes the original plan's automatic-repeat requirement.
 
 The plan records proposed work and acceptance criteria. Implementation has now begun; only the checks listed above have been verified. Distribution and physical-device validation remain pending.
