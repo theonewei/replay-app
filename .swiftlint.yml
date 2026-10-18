@@ -1,0 +1,8 @@
+included:
+  - Replay
+  - ReplayTests
+  - ReplayUITests
+only_rules:
+  - trailing_whitespace
+  - trailing_newline
+  - force_try

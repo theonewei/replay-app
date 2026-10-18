@@ -73,6 +73,10 @@
 				<string>000000000000000000000064</string>
 				<string>000000000000000000000065</string>
 				<string>000000000000000000000066</string>
+				<string>0000000000000000000004B0</string>
+				<string>000000000000000000000514</string>
+				<string>000000000000000000000578</string>
+				<string>000000000000000000000582</string>
 			</array>
 			<key>path</key>
 			<string>Replay</string>
@@ -99,6 +103,8 @@
 			<key>children</key>
 			<array>
 				<string>000000000000000000000006</string>
+				<string>0000000000000000000003EC</string>
+				<string>000000000000000000000450</string>
 			</array>
 			<key>name</key>
 			<string>Products</string>
@@ -113,6 +119,8 @@
 			<array>
 				<string>000000000000000000000003</string>
 				<string>000000000000000000000004</string>
+				<string>0000000000000000000003E9</string>
+				<string>00000000000000000000044D</string>
 			</array>
 			<key>sourceTree</key>
 			<string>&lt;group&gt;</string>
@@ -128,6 +136,10 @@
 				<string>0000000000000000000000C8</string>
 				<string>0000000000000000000000C9</string>
 				<string>0000000000000000000000CA</string>
+				<string>0000000000000000000004B1</string>
+				<string>000000000000000000000515</string>
+				<string>000000000000000000000579</string>
+				<string>000000000000000000000583</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -214,6 +226,8 @@
 			<key>targets</key>
 			<array>
 				<string>000000000000000000000005</string>
+				<string>0000000000000000000003E8</string>
+				<string>00000000000000000000044C</string>
 			</array>
 		</dict>
 		<key>00000000000000000000012C</key>
@@ -234,6 +248,12 @@
 				<string>-Onone</string>
 				<key>DEBUG_INFORMATION_FORMAT</key>
 				<string>dwarf</string>
+				<key>SUPPORTED_PLATFORMS</key>
+				<string>iphoneos iphonesimulator</string>
+				<key>ENABLE_TESTABILITY</key>
+				<string>YES</string>
+				<key>SWIFT_ACTIVE_COMPILATION_CONDITIONS</key>
+				<string>DEBUG $(inherited)</string>
 			</dict>
 			<key>name</key>
 			<string>Debug</string>
@@ -256,6 +276,8 @@
 				<string>-O</string>
 				<key>DEBUG_INFORMATION_FORMAT</key>
 				<string>dwarf-with-dsym</string>
+				<key>SUPPORTED_PLATFORMS</key>
+				<string>iphoneos iphonesimulator</string>
 			</dict>
 			<key>name</key>
 			<string>Release</string>
@@ -320,6 +342,12 @@
 				<string>-Onone</string>
 				<key>DEBUG_INFORMATION_FORMAT</key>
 				<string>dwarf</string>
+				<key>SUPPORTED_PLATFORMS</key>
+				<string>iphoneos iphonesimulator</string>
+				<key>ENABLE_TESTABILITY</key>
+				<string>YES</string>
+				<key>SWIFT_ACTIVE_COMPILATION_CONDITIONS</key>
+				<string>DEBUG $(inherited)</string>
 			</dict>
 			<key>name</key>
 			<string>Debug</string>
@@ -370,6 +398,8 @@
 				<string>-O</string>
 				<key>DEBUG_INFORMATION_FORMAT</key>
 				<string>dwarf-with-dsym</string>
+				<key>SUPPORTED_PLATFORMS</key>
+				<string>iphoneos iphonesimulator</string>
 			</dict>
 			<key>name</key>
 			<string>Release</string>
@@ -387,6 +417,518 @@
 			<string>0</string>
 			<key>defaultConfigurationName</key>
 			<string>Release</string>
+		</dict>
+		<key>0000000000000000000003EA</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>RecordingFormatTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>0000000000000000000003EB</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>0000000000000000000003EA</string>
+		</dict>
+		<key>0000000000000000000003E9</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXGroup</string>
+			<key>children</key>
+			<array>
+				<string>0000000000000000000003EA</string>
+				<string>00000000000000000000051E</string>
+				<string>00000000000000000000058C</string>
+			</array>
+			<key>path</key>
+			<string>ReplayTests</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>0000000000000000000003EC</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>explicitFileType</key>
+			<string>wrapper.cfbundle</string>
+			<key>includeInIndex</key>
+			<string>0</string>
+			<key>path</key>
+			<string>ReplayTests.xctest</string>
+			<key>sourceTree</key>
+			<string>BUILT_PRODUCTS_DIR</string>
+		</dict>
+		<key>0000000000000000000003ED</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXSourcesBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>files</key>
+			<array>
+				<string>0000000000000000000003EB</string>
+				<string>00000000000000000000051F</string>
+				<string>00000000000000000000058D</string>
+			</array>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+		</dict>
+		<key>0000000000000000000003EE</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFrameworksBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>files</key>
+			<array/>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+		</dict>
+		<key>0000000000000000000003EF</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXResourcesBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>files</key>
+			<array/>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+		</dict>
+		<key>0000000000000000000003F3</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXContainerItemProxy</string>
+			<key>containerPortal</key>
+			<string>000000000000000000000001</string>
+			<key>proxyType</key>
+			<string>1</string>
+			<key>remoteGlobalIDString</key>
+			<string>000000000000000000000005</string>
+			<key>remoteInfo</key>
+			<string>Replay</string>
+		</dict>
+		<key>0000000000000000000003F4</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXTargetDependency</string>
+			<key>target</key>
+			<string>000000000000000000000005</string>
+			<key>targetProxy</key>
+			<string>0000000000000000000003F3</string>
+		</dict>
+		<key>0000000000000000000003E8</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXNativeTarget</string>
+			<key>buildConfigurationList</key>
+			<string>0000000000000000000003F0</string>
+			<key>buildPhases</key>
+			<array>
+				<string>0000000000000000000003ED</string>
+				<string>0000000000000000000003EE</string>
+				<string>0000000000000000000003EF</string>
+			</array>
+			<key>buildRules</key>
+			<array/>
+			<key>dependencies</key>
+			<array>
+				<string>0000000000000000000003F4</string>
+			</array>
+			<key>name</key>
+			<string>ReplayTests</string>
+			<key>productName</key>
+			<string>ReplayTests</string>
+			<key>productReference</key>
+			<string>0000000000000000000003EC</string>
+			<key>productType</key>
+			<string>com.apple.product-type.bundle.unit-test</string>
+		</dict>
+		<key>0000000000000000000003F1</key>
+		<dict>
+			<key>isa</key>
+			<string>XCBuildConfiguration</string>
+			<key>buildSettings</key>
+			<dict>
+				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
+				<string>com.example.ReplayPractice.ReplayTests</string>
+				<key>PRODUCT_NAME</key>
+				<string>$(TARGET_NAME)</string>
+				<key>GENERATE_INFOPLIST_FILE</key>
+				<string>YES</string>
+				<key>CODE_SIGN_STYLE</key>
+				<string>Automatic</string>
+				<key>TARGETED_DEVICE_FAMILY</key>
+				<string>1</string>
+				<key>SWIFT_VERSION</key>
+				<string>5.0</string>
+				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
+				<string>17.0</string>
+				<key>LD_RUNPATH_SEARCH_PATHS</key>
+				<string>$(inherited) @executable_path/Frameworks @loader_path/Frameworks</string>
+				<key>TEST_HOST</key>
+				<string>$(BUILT_PRODUCTS_DIR)/Replay.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Replay</string>
+				<key>BUNDLE_LOADER</key>
+				<string>$(TEST_HOST)</string>
+			</dict>
+			<key>name</key>
+			<string>Debug</string>
+		</dict>
+		<key>0000000000000000000003F2</key>
+		<dict>
+			<key>isa</key>
+			<string>XCBuildConfiguration</string>
+			<key>buildSettings</key>
+			<dict>
+				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
+				<string>com.example.ReplayPractice.ReplayTests</string>
+				<key>PRODUCT_NAME</key>
+				<string>$(TARGET_NAME)</string>
+				<key>GENERATE_INFOPLIST_FILE</key>
+				<string>YES</string>
+				<key>CODE_SIGN_STYLE</key>
+				<string>Automatic</string>
+				<key>TARGETED_DEVICE_FAMILY</key>
+				<string>1</string>
+				<key>SWIFT_VERSION</key>
+				<string>5.0</string>
+				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
+				<string>17.0</string>
+				<key>LD_RUNPATH_SEARCH_PATHS</key>
+				<string>$(inherited) @executable_path/Frameworks @loader_path/Frameworks</string>
+				<key>TEST_HOST</key>
+				<string>$(BUILT_PRODUCTS_DIR)/Replay.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Replay</string>
+				<key>BUNDLE_LOADER</key>
+				<string>$(TEST_HOST)</string>
+			</dict>
+			<key>name</key>
+			<string>Release</string>
+		</dict>
+		<key>0000000000000000000003F0</key>
+		<dict>
+			<key>isa</key>
+			<string>XCConfigurationList</string>
+			<key>buildConfigurations</key>
+			<array>
+				<string>0000000000000000000003F1</string>
+				<string>0000000000000000000003F2</string>
+			</array>
+			<key>defaultConfigurationIsVisible</key>
+			<string>0</string>
+			<key>defaultConfigurationName</key>
+			<string>Release</string>
+		</dict>
+		<key>00000000000000000000044E</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>LaunchTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000044F</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000044E</string>
+		</dict>
+		<key>00000000000000000000044D</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXGroup</string>
+			<key>children</key>
+			<array>
+				<string>00000000000000000000044E</string>
+			</array>
+			<key>path</key>
+			<string>ReplayUITests</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000450</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>explicitFileType</key>
+			<string>wrapper.cfbundle</string>
+			<key>includeInIndex</key>
+			<string>0</string>
+			<key>path</key>
+			<string>ReplayUITests.xctest</string>
+			<key>sourceTree</key>
+			<string>BUILT_PRODUCTS_DIR</string>
+		</dict>
+		<key>000000000000000000000451</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXSourcesBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>files</key>
+			<array>
+				<string>00000000000000000000044F</string>
+			</array>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+		</dict>
+		<key>000000000000000000000452</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFrameworksBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>files</key>
+			<array/>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+		</dict>
+		<key>000000000000000000000453</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXResourcesBuildPhase</string>
+			<key>buildActionMask</key>
+			<string>2147483647</string>
+			<key>files</key>
+			<array/>
+			<key>runOnlyForDeploymentPostprocessing</key>
+			<string>0</string>
+		</dict>
+		<key>000000000000000000000457</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXContainerItemProxy</string>
+			<key>containerPortal</key>
+			<string>000000000000000000000001</string>
+			<key>proxyType</key>
+			<string>1</string>
+			<key>remoteGlobalIDString</key>
+			<string>000000000000000000000005</string>
+			<key>remoteInfo</key>
+			<string>Replay</string>
+		</dict>
+		<key>000000000000000000000458</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXTargetDependency</string>
+			<key>target</key>
+			<string>000000000000000000000005</string>
+			<key>targetProxy</key>
+			<string>000000000000000000000457</string>
+		</dict>
+		<key>00000000000000000000044C</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXNativeTarget</string>
+			<key>buildConfigurationList</key>
+			<string>000000000000000000000454</string>
+			<key>buildPhases</key>
+			<array>
+				<string>000000000000000000000451</string>
+				<string>000000000000000000000452</string>
+				<string>000000000000000000000453</string>
+			</array>
+			<key>buildRules</key>
+			<array/>
+			<key>dependencies</key>
+			<array>
+				<string>000000000000000000000458</string>
+			</array>
+			<key>name</key>
+			<string>ReplayUITests</string>
+			<key>productName</key>
+			<string>ReplayUITests</string>
+			<key>productReference</key>
+			<string>000000000000000000000450</string>
+			<key>productType</key>
+			<string>com.apple.product-type.bundle.ui-testing</string>
+		</dict>
+		<key>000000000000000000000455</key>
+		<dict>
+			<key>isa</key>
+			<string>XCBuildConfiguration</string>
+			<key>buildSettings</key>
+			<dict>
+				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
+				<string>com.example.ReplayPractice.ReplayUITests</string>
+				<key>PRODUCT_NAME</key>
+				<string>$(TARGET_NAME)</string>
+				<key>GENERATE_INFOPLIST_FILE</key>
+				<string>YES</string>
+				<key>CODE_SIGN_STYLE</key>
+				<string>Automatic</string>
+				<key>TARGETED_DEVICE_FAMILY</key>
+				<string>1</string>
+				<key>SWIFT_VERSION</key>
+				<string>5.0</string>
+				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
+				<string>17.0</string>
+				<key>LD_RUNPATH_SEARCH_PATHS</key>
+				<string>$(inherited) @executable_path/Frameworks @loader_path/Frameworks</string>
+				<key>TEST_TARGET_NAME</key>
+				<string>Replay</string>
+			</dict>
+			<key>name</key>
+			<string>Debug</string>
+		</dict>
+		<key>000000000000000000000456</key>
+		<dict>
+			<key>isa</key>
+			<string>XCBuildConfiguration</string>
+			<key>buildSettings</key>
+			<dict>
+				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
+				<string>com.example.ReplayPractice.ReplayUITests</string>
+				<key>PRODUCT_NAME</key>
+				<string>$(TARGET_NAME)</string>
+				<key>GENERATE_INFOPLIST_FILE</key>
+				<string>YES</string>
+				<key>CODE_SIGN_STYLE</key>
+				<string>Automatic</string>
+				<key>TARGETED_DEVICE_FAMILY</key>
+				<string>1</string>
+				<key>SWIFT_VERSION</key>
+				<string>5.0</string>
+				<key>IPHONEOS_DEPLOYMENT_TARGET</key>
+				<string>17.0</string>
+				<key>LD_RUNPATH_SEARCH_PATHS</key>
+				<string>$(inherited) @executable_path/Frameworks @loader_path/Frameworks</string>
+				<key>TEST_TARGET_NAME</key>
+				<string>Replay</string>
+			</dict>
+			<key>name</key>
+			<string>Release</string>
+		</dict>
+		<key>000000000000000000000454</key>
+		<dict>
+			<key>isa</key>
+			<string>XCConfigurationList</string>
+			<key>buildConfigurations</key>
+			<array>
+				<string>000000000000000000000455</string>
+				<string>000000000000000000000456</string>
+			</array>
+			<key>defaultConfigurationIsVisible</key>
+			<string>0</string>
+			<key>defaultConfigurationName</key>
+			<string>Release</string>
+		</dict>
+		<key>0000000000000000000004B0</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>RecordingFormat.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>0000000000000000000004B1</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>0000000000000000000004B0</string>
+		</dict>
+		<key>000000000000000000000514</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>PracticeSession.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000515</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000514</string>
+		</dict>
+		<key>00000000000000000000051E</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>PracticeSessionTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000051F</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000051E</string>
+		</dict>
+		<key>000000000000000000000578</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>PlaybackController.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000579</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000578</string>
+		</dict>
+		<key>000000000000000000000582</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>PreviewMedia.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000583</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000582</string>
+		</dict>
+		<key>00000000000000000000058C</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>PlaybackControllerTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000058D</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000058C</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

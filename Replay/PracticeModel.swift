@@ -13,13 +13,14 @@ final class PracticeModel: ObservableObject {
     @Published var saved = false
     @Published var cameraReady = false
     @Published var message: String?
-    @Published var player: AVPlayer?
+    let playback = PlaybackController()
+    var player: AVPlayer? { playback.player }
     @Published var takeURL: URL?
     @Published var inputs: [AVAudioSessionPortDescription] = []
     @Published var selectedInput: String?
     let camera = CameraRecorder()
     private var recorder: AVAudioRecorder?
-    private var endObserver: NSObjectProtocol?
+    private var playbackObservation: AnyCancellable?
     private var interruptionObserver: NSObjectProtocol?
     private var pendingURL: URL?
     private var position: AVCaptureDevice.Position = .front
@@ -30,6 +31,10 @@ final class PracticeModel: ObservableObject {
     }
 
     init() {
+        playbackObservation = playback.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        playback.onError = { [weak self] in self?.message = $0 }
         // The app owns this folder exclusively. Unsaved takes do not survive a launch.
         try? FileManager.default.removeItem(at: folder)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -40,6 +45,16 @@ final class PracticeModel: ObservableObject {
 
     func prepare() async {
         guard !recording, !busy, player == nil else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--preview-audio") {
+            do {
+                replay(try PreviewMedia.makeAudio(in: folder),
+                       autoplay: !ProcessInfo.processInfo.arguments.contains("--preview-paused"))
+            }
+            catch { message = error.localizedDescription }
+            return
+        }
+        #endif
         busy = true
         defer { busy = false }
         do {
@@ -87,7 +102,7 @@ final class PracticeModel: ObservableObject {
                     throw PracticeError("Allow camera access in Settings to record video.")
                 }
             }
-            player?.pause()
+            playback.pause()
             if mode == .audio {
                 await camera.stopSession()
                 try configureInput()
@@ -97,14 +112,7 @@ final class PracticeModel: ObservableObject {
             }
             let url = folder.appendingPathComponent("Take-\(UUID().uuidString).\(mode == .audio ? "wav" : "mov")")
             if mode == .audio {
-                let settings: [String: Any] = [
-                    AVFormatIDKey: kAudioFormatLinearPCM,
-                    AVSampleRateKey: AVAudioSession.sharedInstance().sampleRate,
-                    AVNumberOfChannelsKey: 1,
-                    AVLinearPCMBitDepthKey: 24,
-                    AVLinearPCMIsFloatKey: false,
-                    AVLinearPCMIsBigEndianKey: false
-                ]
+                let settings = try RecordingFormat.settings(sampleRate: AVAudioSession.sharedInstance().sampleRate)
                 let newRecorder = try AVAudioRecorder(url: url, settings: settings)
                 guard newRecorder.record() else { throw PracticeError("Recording could not start. Please try again.") }
                 recorder = newRecorder
@@ -151,28 +159,18 @@ final class PracticeModel: ObservableObject {
         }
     }
 
-    private func replay(_ url: URL) {
+    private func replay(_ url: URL, autoplay: Bool = true) {
         takeURL = url
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default)
             try session.setActive(true)
-            let next = AVPlayer(url: url)
-            player = next
-            if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }
-            endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: next.currentItem, queue: .main) { [weak next] _ in
-                next?.seek(to: .zero) { finished in
-                    if finished && UIApplication.shared.applicationState == .active { next?.play() }
-                }
-            }
-            if UIApplication.shared.applicationState == .active { next.play() }
+            playback.load(url, autoplay: autoplay && UIApplication.shared.applicationState == .active)
         } catch { message = error.localizedDescription }
     }
 
     private func clearTake() {
-        player?.pause()
-        player = nil
-        if let observer = endObserver { NotificationCenter.default.removeObserver(observer); endObserver = nil }
+        playback.clear()
         if let url = takeURL { try? FileManager.default.removeItem(at: url) }
         takeURL = nil
     }
@@ -184,12 +182,13 @@ final class PracticeModel: ObservableObject {
 
     func suspend() {
         if recording { stop() }
-        player?.pause()
+        playback.pause()
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
     func saveVideo() async {
         guard let url = takeURL, !busy else { return }
+        playback.pause()
         busy = true
         defer { busy = false }
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)

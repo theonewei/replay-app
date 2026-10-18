@@ -1,6 +1,6 @@
 import SwiftUI
-import AVKit
-import UniformTypeIdentifiers
+import AVFoundation
+import UIKit
 
 struct PracticeView: View {
     @StateObject private var model = PracticeModel()
@@ -15,18 +15,29 @@ struct PracticeView: View {
                     Text("Video").tag(PracticeModel.Mode.video)
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("practice.mode")
                 .disabled(model.recording || model.busy)
 
                 Group {
                     if let player = model.player {
-                        VideoPlayer(player: player)
-                            .overlay(alignment: .topLeading) {
-                                if model.takeMode == .audio {
-                                    Label("Audio take", systemImage: "waveform")
-                                        .padding().foregroundStyle(.white)
-                                        .allowsHitTesting(false)
+                        ZStack {
+                            if model.takeMode == .video {
+                                VideoPlaybackSurface(player: player)
+                            } else {
+                                VStack(spacing: 16) {
+                                    Image(systemName: "waveform")
+                                        .font(.system(size: 64, weight: .ultraLight))
+                                        .foregroundStyle(.secondary)
+                                    Text("Audio take").font(.title3)
+                                    Text(model.playback.hasFinished ? "Finished" : model.playback.isPlaying ? "Playing" : "Paused")
+                                        .foregroundStyle(.secondary)
                                 }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
+                            if !model.playback.isReady {
+                                ProgressView("Preparing replay")
+                            }
+                        }
                     } else if model.mode == .video && model.cameraReady {
                         CameraPreview(session: model.camera.session)
                     } else {
@@ -44,6 +55,11 @@ struct PracticeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(uiColor: .secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 24))
+
+                if model.player != nil {
+                    PlaybackControls(playback: model.playback)
+                        .disabled(model.recording || model.busy)
+                }
 
                 if model.mode == .audio {
                     Menu {
@@ -78,6 +94,7 @@ struct PracticeView: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier("practice.record")
                     .accessibilityLabel(model.recording ? "Stop and replay" : "Record new take")
                     .disabled(model.busy)
                     Spacer()
@@ -85,7 +102,7 @@ struct PracticeView: View {
                         if model.takeMode == .video {
                             Task { await model.saveVideo() }
                         } else {
-                            model.player?.pause()
+                            model.playback.pause()
                             exporting = true
                         }
                     } label: {
@@ -93,9 +110,11 @@ struct PracticeView: View {
                             Image(systemName: model.saved ? "checkmark" : "square.and.arrow.down")
                             Text(model.saved ? "Saved" : "Save").font(.caption)
                         }.frame(width: 64, height: 44)
-                    }.disabled(model.takeURL == nil || model.recording || model.busy || model.saved)
+                    }
+                    .accessibilityIdentifier("practice.save")
+                    .disabled(model.takeURL == nil || model.recording || model.busy || model.saved)
                 }
-                Text(model.recording ? "Tap stop to replay" : model.takeURL == nil ? "Only your latest take stays here" : "Loops until you record again")
+                Text(model.recording ? "Tap stop to replay" : model.takeURL == nil ? "Only your latest take stays here" : (model.playback.loopEnabled ? "Loop is on" : "Plays once · Turn on Loop to repeat"))
                     .font(.footnote).foregroundStyle(.secondary)
             }
             .padding()
@@ -150,5 +169,72 @@ struct CameraPreview: UIViewRepresentable {
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var preview: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    }
+}
+
+
+struct PlaybackControls: View {
+    @ObservedObject var playback: PlaybackController
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Slider(
+                value: Binding(get: { playback.position }, set: { playback.seek(to: $0) }),
+                in: 0...max(playback.duration, 0.001),
+                onEditingChanged: { editing in
+                    if editing { playback.beginScrubbing() } else { playback.endScrubbing() }
+                }
+            )
+            .accessibilityLabel("Recording timeline")
+            .accessibilityValue("\(playback.positionLabel) of \(playback.durationLabel)")
+            .accessibilityHint("Adjust to move through this recording.")
+            .accessibilityIdentifier("playback.timeline")
+            .disabled(!playback.isReady)
+
+            HStack {
+                Text(playback.positionLabel).accessibilityIdentifier("playback.elapsed")
+                Spacer()
+                Text(playback.durationLabel).accessibilityIdentifier("playback.duration")
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+
+            HStack {
+                Button(action: playback.togglePlayback) {
+                    Label(playback.isPlaying ? "Pause" : "Play", systemImage: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(minWidth: 80, minHeight: 44)
+                }
+                .accessibilityIdentifier("playback.playPause")
+                .disabled(!playback.isReady)
+
+                Spacer()
+                Text("Loop")
+                Toggle("Loop", isOn: $playback.loopEnabled)
+                    .labelsHidden()
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("playback.loop")
+                    .accessibilityHint("Repeat this take until paused.")
+            }
+        }
+    }
+}
+
+struct VideoPlaybackSurface: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerView {
+        let view = PlayerView()
+        view.layerPlayer.videoGravity = .resizeAspect
+        view.layerPlayer.player = player
+        return view
+    }
+
+    func updateUIView(_ view: PlayerView, context: Context) {
+        view.layerPlayer.player = player
+    }
+
+    final class PlayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var layerPlayer: AVPlayerLayer { layer as! AVPlayerLayer }
     }
 }
