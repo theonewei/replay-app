@@ -19,7 +19,7 @@ Baseline work is in progress: a shared `Replay` scheme, Swift Testing and UI tes
 - Native playback controls and an accessible timeline; recording elapsed time remains planned.
 - No app-added audio effects or processing. This does not guarantee identical sound across hardware or system capture paths.
 
-A tuner, live monitoring, effects, editing, slow motion, an in-app library, accounts, and cloud sync are outside the first-version scope.
+A tuner, live audio monitoring, effects, editing, slow motion, an in-app library, accounts, and cloud sync are outside the first-version scope. Fullscreen video playback, phone-matched camera orientation, and delayed video streaming are planned additions described below.
 
 ### Planned rolling capture
 
@@ -74,7 +74,7 @@ Verified on **iPhone 18 Pro / iOS 27.0 (24A434)**. With Xcode 27, the simulator 
 
 ## Implementation roadmap
 
-Follow **Steps 1–8 → Step 8A → Steps 9–12**. Existing prototype code is a starting point to verify, not evidence that any milestone is complete.
+Follow **Steps 1–8 → Step 8A → Step 8B → Steps 9–12**. Existing prototype code is a starting point to verify, not evidence that any milestone is complete.
 
 | Step | Work |
 | --- | --- |
@@ -83,10 +83,11 @@ Follow **Steps 1–8 → Step 8A → Steps 9–12**. Existing prototype code is 
 | 3 | Implement one-take storage, safe replacement, recovery, an atomic manifest, and bounded cleanup |
 | 4 | Handle permissions, input selection, actual routes, and accessory changes |
 | 5 | Validate lossless audio capture, start/finalization results, elapsed time, live audio visualization, and no app-added processing |
-| 6 | Readiness-aware autoplay, optional looping, pause, timeline seeking, and observer cleanup are implemented; device validation remains pending |
-| 7 | Verify camera preview, front/back capture, framing, orientation, sound, and asynchronous capture callbacks |
+| 6 | Readiness-aware autoplay, optional looping, pause, timeline seeking, and observer cleanup are implemented; fullscreen video playback and device validation remain planned |
+| 7 | Verify camera preview, front/back capture, framing, phone-matched portrait/landscape orientation, sound, and asynchronous capture callbacks |
 | 8 | Integrate mode switching with one retained take and correct resource ownership |
 | 8A | Add bounded rolling audio/video capture, exact replay windows, stopped capture during replay, and explicit restart |
+| 8B | Add continuous delayed video streaming with configurable delay, buffering feedback, bounded resources, and interruption recovery |
 | 9 | Tie Files/Photos export progress and outcomes to the correct take |
 | 10 | Handle interruptions, lifecycle transitions, input loss, storage exhaustion, and resource failures |
 | 11 | Verify native UI, VoiceOver, Dynamic Type, appearance, and small-screen layout |
@@ -97,6 +98,14 @@ Follow **Steps 1–8 → Step 8A → Steps 9–12**. Existing prototype code is 
 Show live audio bars or a waveform while recording audio, driven by actual microphone input. This is visual feedback and leaves the recorded sound unchanged. The exact presentation remains a design choice. Implement alongside audio capture (Step 5) and accessible recording controls (Step 11).
 
 Stop/reset the display when capture ends or fails, ignore stale updates, keep history and update frequency bounded, and respect Reduce Motion. Validate silence, quiet/loud input, interruptions, and repeated recordings. This feature is planned and is not yet implemented.
+
+### Planned video additions
+
+- **Fullscreen playback:** open recorded video fullscreen, preserve the complete frame and play/pause, timeline, and optional Loop controls. Returning to the practice screen preserves playback position and intent. Play once remains the default. Planned for Steps 6 and 11.
+- **Phone-matched orientation:** camera preview and recorded video follow the phone's portrait or landscape orientation; replay and exports display upright. Rotation within a take and front-camera mirroring still need design decisions. Planned for Step 7.
+- **Delayed video stream:** keep capturing while the display shows video from a configurable time in the past, such as 15 seconds. Show buffering until the delay is available, and keep memory/storage bounded during continuous use. Planned as Step 8B after the bounded-buffer work in Step 8A.
+
+These features are not yet implemented. Fifteen seconds is an example, not a confirmed default or limit. Delay presets/range, audio behavior, changes while streaming, saving from this mode, and handling the existing retained take remain undecided. Verification will cover fullscreen/rotation behavior, timestamped delay fixtures, buffering/restarts, and sustained delay/resource measurements on a physical iPhone.
 
 ### Intended architecture
 
@@ -109,11 +118,11 @@ Split hardware, storage, and timing boundaries into small testable services:
 - `ExportService`: Files and Photos results associated with a take ID.
 - SwiftUI views: state presentation, actions, native sheets, and accessibility.
 
-The coordinator should model ready, preparing, recording, finishing, replaying, paused, exporting, and recoverable-error states. Recording and playback must never overlap. Delayed or stale callbacks must not replace newer state or media.
+The coordinator should model ready, preparing, recording, finishing, replaying, paused, exporting, and recoverable-error states. Standard and rolling modes stop capture before replay. The planned delayed-stream mode needs separate states for concurrent capture and delayed video display. Delayed or stale callbacks must not replace newer state or media.
 
 ### Decisions still needed
 
-The prototype keeps iOS 17, its mono lossless PCM format, and temporary-only relaunch storage. It now preserves the previous take on start failure, pauses on mode changes and export, and avoids automatic resume after interruptions. Persistent relaunch retention, final camera/orientation/mirroring choices, accessory support, recording duration coverage, and latency targets still need product decisions and device validation.
+The prototype keeps iOS 17, its mono lossless PCM format, and temporary-only relaunch storage. It now preserves the previous take on start failure, pauses on mode changes and export, and avoids automatic resume after interruptions. Phone-matched portrait/landscape orientation is requested. Persistent relaunch retention, rotation within a take, camera mirroring, delayed-stream policies, accessory support, recording duration coverage, and latency targets still need product decisions and device validation.
 
 ## Validation plan
 
@@ -166,6 +175,6 @@ Playback starts once by default. Loop starts off on each app launch and can be t
 
 ## Source documents
 
-This README summarizes Isaac's second-brain note **Replay — Implementation and testing plan**, updated **October 18, 2026**, at `life/Replay/Implementation-plan.md`. Related notes are `life/Replay/Product-design.md` and `life/Replay/UI-design.md`. These documents live in the personal Obsidian vault and are not bundled with this repository. The October 17, 2026 request to play once by default with optional looping supersedes the original plan's automatic-repeat requirement.
+This README summarizes Isaac's second-brain note **Replay — Implementation and testing plan**, updated **October 21, 2026**, at `life/Replay/Implementation-plan.md`. Related notes are `life/Replay/Product-design.md` and `life/Replay/UI-design.md`. These documents live in the personal Obsidian vault and are not bundled with this repository. The October 17, 2026 request to play once by default with optional looping supersedes the original plan's automatic-repeat requirement.
 
 The plan records proposed work and acceptance criteria. Implementation has now begun; only the checks listed above have been verified. Distribution and physical-device validation remain pending.
