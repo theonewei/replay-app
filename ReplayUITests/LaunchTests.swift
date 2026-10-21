@@ -1,6 +1,71 @@
 import XCTest
 
 final class LaunchTests: XCTestCase {
+    func testFullscreenVideoPreservesPlaybackAndRotates() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--preview-video", "--preview-paused"]
+        app.launch()
+        let done = app.buttons["video.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 15))
+        XCTAssertEqual(app.buttons["playback.playPause"].label, "Play")
+        XCTAssertEqual(app.switches["playback.loop"].value as? String, "0")
+        app.sliders["playback.timeline"].adjust(toNormalizedSliderPosition: 0.5)
+        let elapsed = app.staticTexts["playback.elapsed"].label
+        app.switches["playback.loop"].tap()
+        done.tap()
+        let fullscreen = app.buttons["video.fullscreen"]
+        XCTAssertTrue(fullscreen.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["playback.elapsed"].label, elapsed)
+        fullscreen.tap()
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.switches["playback.loop"].value as? String, "1")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertGreaterThan(app.frame.width, app.frame.height)
+        XCTAssertTrue(done.isHittable)
+        XCTAssertTrue(app.buttons["playback.playPause"].isHittable)
+        XCTAssertEqual(app.staticTexts["playback.elapsed"].label, elapsed)
+        done.tap()
+        XCTAssertTrue(fullscreen.waitForExistence(timeout: 5))
+        XCTAssertTrue(fullscreen.isHittable)
+        fullscreen.tap()
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
+        app.buttons["playback.playPause"].tap()
+        XCTAssertEqual(app.buttons["playback.playPause"].label, "Pause")
+        done.tap()
+        XCTAssertEqual(app.buttons["playback.playPause"].label, "Pause")
+    }
+
+    func testDelayedVideoBuffersStopsAndRestarts() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-capture", "--fixture-stream", "--fast-stream"]
+        app.launch()
+        app.buttons["Video"].tap()
+        app.buttons["Delayed stream"].tap()
+        let startStop = app.buttons["stream.startStop"]
+        XCTAssertTrue(startStop.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Delay: 15 seconds"].exists)
+        startStop.tap()
+        let status = app.staticTexts["stream.status"]
+        let streaming = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Streaming'"), object: status)
+        XCTAssertEqual(XCTWaiter.wait(for: [streaming], timeout: 10), .completed)
+        XCTAssertFalse(app.steppers["stream.delay"].isEnabled)
+        XCTAssertFalse(app.buttons["Audio"].isEnabled)
+        startStop.tap()
+        XCTAssertEqual(startStop.label, "Start stream")
+        XCTAssertTrue(app.steppers["stream.delay"].isEnabled)
+        XCTAssertFalse(app.images["Delayed camera video"].exists)
+        startStop.tap()
+        XCTAssertTrue(status.label.contains("Starting") || status.label.contains("Buffering"))
+        let restarted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Streaming'"), object: status)
+        XCTAssertEqual(XCTWaiter.wait(for: [restarted], timeout: 10), .completed)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertEqual(startStop.label, "Start stream")
+    }
+
     func testLaunchShowsPracticeControls() {
         continueAfterFailure = false
         let app = XCUIApplication()

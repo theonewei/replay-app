@@ -153,6 +153,7 @@ final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var completion: (@Sendable (Result<URL, Error>) -> Void)?
     private var started: (@Sendable () -> Void)?
     private var stopRequested = false
+    private var rotation: AVCaptureDevice.RotationCoordinator?
 
     func prepare(position: AVCaptureDevice.Position) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -169,6 +170,7 @@ final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                         let input = try AVCaptureDeviceInput(device: device)
                         guard self.session.canAddInput(input) else { throw PracticeError("Cannot access the camera.") }
                         self.session.addInput(input)
+                        self.rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
                         if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
                            let mic = AVCaptureDevice.default(for: .audio) {
                             let audio = try AVCaptureDeviceInput(device: mic)
@@ -177,9 +179,6 @@ final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                         if !self.session.outputs.contains(self.output) {
                             guard self.session.canAddOutput(self.output) else { throw PracticeError("Cannot record video on this device.") }
                             self.session.addOutput(self.output)
-                        }
-                        if let connection = self.output.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
-                            connection.videoRotationAngle = 90
                         }
                         self.session.commitConfiguration()
                     } catch {
@@ -195,6 +194,16 @@ final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
 
     func record(to url: URL, started: @escaping @Sendable () -> Void, completion: @escaping @Sendable (Result<URL, Error>) -> Void) {
         queue.async {
+            // Movie files have one orientation transform. Choose it at Record;
+            // rotating the phone later does not rewrite the take's framing.
+            if let connection = self.output.connection(with: .video), let rotation = self.rotation {
+                let angle = rotation.videoRotationAngleForHorizonLevelCapture
+                if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+                if connection.isVideoMirroringSupported {
+                    connection.automaticallyAdjustsVideoMirroring = false
+                    connection.isVideoMirrored = false
+                }
+            }
             self.completion = completion
             self.started = started
             self.stopRequested = false

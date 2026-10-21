@@ -78,6 +78,10 @@
 				<string>000000000000000000000578</string>
 				<string>000000000000000000000582</string>
 				<string>0000000000000000000005DC</string>
+				<string>000000000000000000000640</string>
+				<string>00000000000000000000064A</string>
+				<string>000000000000000000000654</string>
+				<string>00000000000000000000065E</string>
 			</array>
 			<key>path</key>
 			<string>Replay</string>
@@ -142,6 +146,10 @@
 				<string>000000000000000000000579</string>
 				<string>000000000000000000000583</string>
 				<string>0000000000000000000005DD</string>
+				<string>000000000000000000000641</string>
+				<string>00000000000000000000064B</string>
+				<string>000000000000000000000655</string>
+				<string>00000000000000000000065F</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -337,7 +345,7 @@
 				<key>INFOPLIST_KEY_UILaunchScreen_Generation</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_UISupportedInterfaceOrientations</key>
-				<string>UIInterfaceOrientationPortrait</string>
+				<string>UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight</string>
 				<key>SUPPORTS_MACCATALYST</key>
 				<string>NO</string>
 				<key>SWIFT_OPTIMIZATION_LEVEL</key>
@@ -393,7 +401,7 @@
 				<key>INFOPLIST_KEY_UILaunchScreen_Generation</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_UISupportedInterfaceOrientations</key>
-				<string>UIInterfaceOrientationPortrait</string>
+				<string>UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight</string>
 				<key>SUPPORTS_MACCATALYST</key>
 				<string>NO</string>
 				<key>SWIFT_OPTIMIZATION_LEVEL</key>
@@ -448,6 +456,7 @@
 				<string>00000000000000000000051E</string>
 				<string>00000000000000000000058C</string>
 				<string>0000000000000000000005E6</string>
+				<string>000000000000000000000668</string>
 			</array>
 			<key>path</key>
 			<string>ReplayTests</string>
@@ -479,6 +488,7 @@
 				<string>00000000000000000000051F</string>
 				<string>00000000000000000000058D</string>
 				<string>0000000000000000000005E7</string>
+				<string>000000000000000000000669</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -969,6 +979,96 @@
 			<string>PBXBuildFile</string>
 			<key>fileRef</key>
 			<string>0000000000000000000005E6</string>
+		</dict>
+		<key>000000000000000000000640</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedFrameBuffer.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000641</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000640</string>
+		</dict>
+		<key>00000000000000000000064A</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedVideoCapture.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000064B</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000064A</string>
+		</dict>
+		<key>000000000000000000000654</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedStreamModel.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000655</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000654</string>
+		</dict>
+		<key>00000000000000000000065E</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedStreamView.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>00000000000000000000065F</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>00000000000000000000065E</string>
+		</dict>
+		<key>000000000000000000000668</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedFrameBufferTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>000000000000000000000669</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>000000000000000000000668</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

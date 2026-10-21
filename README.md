@@ -6,7 +6,7 @@ The core loop is **choose Audio or Video → Record → Stop → automatic playb
 
 ## Status
 
-This repository contains an **early prototype**, not a completed implementation of the plan. The source includes audio/video capture, play-once playback with optional looping and a seekable timeline, microphone selection, camera switching, and export. Debug simulator and unsigned Release device builds now pass with Xcode 27.0. Unit/integration playback tests and the timeline/Loop UI test pass on the simulator. Physical-device capture and export workflows remain unverified.
+This repository contains an **early prototype**, not a completed implementation of the plan. The source includes audio/video capture, fullscreen video replay, phone-aware camera orientation, silent delayed video streaming, play-once playback with optional looping and a seekable timeline, microphone selection, camera switching, and export. Debug simulator and unsigned Release device builds now pass with Xcode 27.0. Unit/integration playback tests and the timeline/Loop UI test pass on the simulator. Physical-device capture and export workflows remain unverified.
 
 Baseline work is in progress: a shared `Replay` scheme, Swift Testing and UI test targets, accessibility identifiers, and a focused SwiftLint configuration are present. The session state machine now drives recording, playback, mode switching, and export. Operation IDs reject stale callbacks, and a previous take is replaced only after confirmed capture start. Replay now launches successfully on the iPhone 18 Pro simulator with iOS 27.0. PCM format tests, playback integration tests, the launch smoke test, and the timeline/Loop UI test pass on the simulator. Rolling capture and CI are not implemented.
 
@@ -19,7 +19,7 @@ Baseline work is in progress: a shared `Replay` scheme, Swift Testing and UI tes
 - Native playback controls and an accessible timeline; recording elapsed time remains planned.
 - No app-added audio effects or processing. This does not guarantee identical sound across hardware or system capture paths.
 
-A tuner, live audio monitoring, effects, editing, slow motion, an in-app library, accounts, and cloud sync are outside the first-version scope. Fullscreen video playback, phone-matched camera orientation, and delayed video streaming are planned additions described below.
+A tuner, live audio monitoring, effects, editing, slow motion, an in-app library, accounts, and cloud sync are outside the first-version scope. Fullscreen video playback, phone-matched camera orientation, and delayed video streaming are implemented in the prototype; physical-device validation remains pending.
 
 ### Planned rolling capture
 
@@ -64,7 +64,11 @@ Verified on **iPhone 18 Pro / iOS 27.0 (24A434)**. With Xcode 27, the simulator 
 | `ReplayUITests/LaunchTests.swift` | Launch controls, timeline/Loop, native Files Save/Cancel, and failed replacement recovery |
 | `scripts/run-simulator.sh` | Build, install, and open the app in an available iPhone simulator |
 | `Replay/PracticeModel.swift` | Executes session effects, validates completed media, owns the current take, and associates exports with take IDs |
-| `Replay/PracticeServices.swift` | Native audio/camera adapters and Photos export; injectable capture/export boundaries for tests |
+| `Replay/PracticeServices.swift` | Native audio/camera adapters, capture orientation, and Photos export |
+| `Replay/DelayedFrameBuffer.swift` | Timestamp-based delay selection, capture-gap reset, and compressed byte/frame limits |
+| `Replay/DelayedVideoCapture.swift` | Serial silent camera capture, JPEG compression, rotation, and a bounded UI mailbox |
+| `Replay/DelayedStreamModel.swift` / `DelayedStreamView.swift` | Delay configuration, buffering/display states, stop/restart, and lifecycle cleanup |
+| `ReplayTests/DelayedFrameBufferTests.swift` | Delay accuracy, resource bounds, gap recovery, and invalid timestamps |
 | `ReplayTests/PracticeModelTests.swift` | Early Stop, failed replacement, interruption finalization, Save cancellation/retry, and exported-copy retention |
 | `Replay.xcodeproj/project.pbxproj` | iPhone app target and build settings |
 
@@ -83,11 +87,11 @@ Follow **Steps 1–8 → Step 8A → Step 8B → Steps 9–12**. Existing protot
 | 3 | Implement one-take storage, safe replacement, recovery, an atomic manifest, and bounded cleanup |
 | 4 | Handle permissions, input selection, actual routes, and accessory changes |
 | 5 | Validate lossless audio capture, start/finalization results, elapsed time, live audio visualization, and no app-added processing |
-| 6 | Readiness-aware autoplay, optional looping, pause, timeline seeking, and observer cleanup are implemented; fullscreen video playback and device validation remain planned |
-| 7 | Verify camera preview, front/back capture, framing, phone-matched portrait/landscape orientation, sound, and asynchronous capture callbacks |
+| 6 | Readiness-aware autoplay, optional looping, pause, timeline seeking, fullscreen video replay, and observer cleanup are implemented; device validation remains pending |
+| 7 | Camera preview and capture use native rotation coordinators; verify front/back framing, orientation, sound, and capture callbacks on device |
 | 8 | Integrate mode switching with one retained take and correct resource ownership |
 | 8A | Add bounded rolling audio/video capture, exact replay windows, stopped capture during replay, and explicit restart |
-| 8B | Add continuous delayed video streaming with configurable delay, buffering feedback, bounded resources, and interruption recovery |
+| 8B | Silent delayed video with a 5–30 second delay, bounded compressed-frame storage, buffering, and stop/restart is implemented; sustained device measurements remain pending |
 | 9 | Tie Files/Photos export progress and outcomes to the correct take |
 | 10 | Handle interruptions, lifecycle transitions, input loss, storage exhaustion, and resource failures |
 | 11 | Verify native UI, VoiceOver, Dynamic Type, appearance, and small-screen layout |
@@ -99,13 +103,17 @@ Show live audio bars or a waveform while recording audio, driven by actual micro
 
 Stop/reset the display when capture ends or fails, ignore stale updates, keep history and update frequency bounded, and respect Reduce Motion. Validate silence, quiet/loud input, interruptions, and repeated recordings. This feature is planned and is not yet implemented.
 
-### Planned video additions
+### Video playback and delayed streaming
 
-- **Fullscreen playback:** open recorded video fullscreen, preserve the complete frame and play/pause, timeline, and optional Loop controls. Returning to the practice screen preserves playback position and intent. Play once remains the default. Planned for Steps 6 and 11.
-- **Phone-matched orientation:** camera preview and recorded video follow the phone's portrait or landscape orientation; replay and exports display upright. Rotation within a take and front-camera mirroring still need design decisions. Planned for Step 7.
-- **Delayed video stream:** keep capturing while the display shows video from a configurable time in the past, such as 15 seconds. Show buffering until the delay is available, and keep memory/storage bounded during continuous use. Planned as Step 8B after the bounded-buffer work in Step 8A.
+Recorded video opens fullscreen with play/pause, the timeline, optional Loop, Save, and Done. Closing/reopening fullscreen preserves the same player and position. Playback runs once by default. Both the practice screen and fullscreen player support portrait and landscape.
 
-These features are not yet implemented. Fifteen seconds is an example, not a confirmed default or limit. Delay presets/range, audio behavior, changes while streaming, saving from this mode, and handling the existing retained take remain undecided. Verification will cover fullscreen/rotation behavior, timestamped delay fixtures, buffering/restarts, and sustained delay/resource measurements on a physical iPhone.
+Camera preview uses Apple's rotation coordinator and mirrors the front camera for framing. Recorded video is unmirrored and takes its orientation from the phone when Record is tapped. A movie keeps that orientation throughout the take; rotate before recording to choose portrait or landscape. Verify front/back recording and Photos output on a physical iPhone.
+
+For delayed video, choose **Video → Delayed stream**, set a **5–30 second** delay (one-second steps; default **15 seconds**), and tap **Start stream**. The display fills its history before showing delayed frames while capture continues. Stop clears the stream; restarting fills a new buffer. Delay/mode changes are disabled while streaming. Backgrounding, camera interruptions, and failures stop the stream; returning to the app does not restart it.
+
+The initial delayed mode uses the **front camera**, **silent video**, VGA capture (640×480 before rotation), and **up to 15 displayed frames per second**. It holds compressed JPEG frames in memory, with a **64 MiB compressed-data cap** and a **600-frame cap**, and retains no stream files. The system camera, encoder, and current displayed image use additional memory. Capture timestamps select frames at the configured delay; UI delivery adds latency, so actual on-device timing still needs measurement. A capture gap refills the history, and exceeding a resource limit stops with a recoverable error.
+
+Delayed streaming preserves the existing recorded take and has no Save action or audio playback. Return to Record mode to replay/export the retained take. Normal recording and rolling capture remain separate workflows; rolling capture is still unimplemented.
 
 ### Intended architecture
 
@@ -118,11 +126,11 @@ Split hardware, storage, and timing boundaries into small testable services:
 - `ExportService`: Files and Photos results associated with a take ID.
 - SwiftUI views: state presentation, actions, native sheets, and accessibility.
 
-The coordinator should model ready, preparing, recording, finishing, replaying, paused, exporting, and recoverable-error states. Standard and rolling modes stop capture before replay. The planned delayed-stream mode needs separate states for concurrent capture and delayed video display. Delayed or stale callbacks must not replace newer state or media.
+The practice coordinator models ready, preparing, recording, finishing, replaying, paused, exporting, and recoverable-error states. Standard and rolling modes stop capture before replay. `DelayedStreamModel` owns separate starting/buffering/streaming/stopped/error states for concurrent capture and delayed video display, with session IDs and a single-slot mailbox rejecting stale or backed-up UI updates. Delayed or stale callbacks must not replace newer state or media.
 
 ### Decisions still needed
 
-The prototype keeps iOS 17, its mono lossless PCM format, and temporary-only relaunch storage. It now preserves the previous take on start failure, pauses on mode changes and export, and avoids automatic resume after interruptions. Phone-matched portrait/landscape orientation is requested. Persistent relaunch retention, rotation within a take, camera mirroring, delayed-stream policies, accessory support, recording duration coverage, and latency targets still need product decisions and device validation.
+The prototype keeps iOS 17, its mono lossless PCM format, and temporary-only relaunch storage. It now preserves the previous take on start failure, pauses on mode changes and export, and avoids automatic resume after interruptions. Camera orientation is chosen at the start of a recorded take; delayed video follows rotation continuously. Persistent relaunch retention, accessory support, recording duration coverage, and latency targets still need product decisions and device validation. Expanding delayed video beyond its current front-camera, silent, temporary display is future scope.
 
 ## Validation plan
 
@@ -163,11 +171,11 @@ xcodebuild -project Replay.xcodeproj -scheme Replay -configuration Release -dest
 
 This small SwiftPM harness uses the installed Command Line Tools and their Swift Testing framework on macOS 14 or later. It runs the same session tests included in the iOS unit target without requiring a simulator, microphone, or camera. Format and UI tests remain exclusive to the Xcode project.
 
-Current evidence: **Debug simulator, unsigned Release device, and test-target builds pass**; **23 simulator unit/integration tests and four UI scenarios pass**; **11 host-side session tests also pass**; **SwiftLint 0.65.1 reports zero violations**; and project/scheme reference checks plus shell syntax checks pass. Simulator launch, timeline playback, the generated recording-to-replay flow, native Files save/cancel, and failed-start recovery are verified. Capture tests inject deterministic callbacks and generated audio/video fixtures. Physical microphone/camera capture, accessory routing, real interruptions, and saving to Photos still require an iPhone. Camera-session work and start/stop callbacks are serialized. Mode changes pause replay and preserve the take; exports pause replay and remain paused after completion or cancellation. Transient permission/save-sheet inactivity does not end recording; backgrounding and interruptions stop capture safely without automatic resume.
+Current evidence: **Debug simulator, unsigned Release device, and test-target builds pass**; **31 simulator unit/integration tests and six UI scenarios pass**; **15 host-side session/delay-buffer tests also pass**; **SwiftLint 0.65.1 reports zero violations**; and project/scheme reference checks plus shell syntax checks pass. Simulator launch, timeline playback, fullscreen position/Loop/play-intent preservation and landscape layout, delayed-stream buffering/stop/restart/background behavior, the generated recording-to-replay flow, native Files save/cancel, and failed-start recovery are verified. Delay selection and buffer bounds are tested for every integer delay from 5 through 30 seconds. Capture tests inject deterministic callbacks and generated audio/video fixtures. Physical microphone/camera capture, front/back orientation and Photos output, sustained delayed-stream timing/thermal/resource measurements, accessory routing, real interruptions, and saving to Photos still require an iPhone. Camera-session work and start/stop callbacks are serialized. Mode changes pause replay and preserve the take; exports pause replay and remain paused after completion or cancellation. Transient permission/save-sheet inactivity does not end recording; backgrounding and interruptions stop capture safely without automatic resume.
 
 ### Preview playback controls
 
-Run `./scripts/run-simulator.sh --preview-audio --preview-paused` for a playback preview. Debug builds accept these launch arguments to load a generated 12-second silent clip. This lets you inspect the timeline and Loop switch without capturing microphone input. Normal launches still begin ready to record. `--fixture-capture` substitutes generated audio for capture in simulator workflow tests; it never requests microphone input. `--fail-second-start` injects one replacement failure in that harness. Preview arguments are ignored in Release builds.
+Run `./scripts/run-simulator.sh --preview-audio --preview-paused` for a playback preview. Debug builds accept these launch arguments to load a generated 12-second silent clip. Use `--preview-video --preview-paused` for generated fullscreen video. UI tests use `--fixture-capture --fixture-stream` for animated timestamped camera fixtures without hardware; `--fast-stream` accelerates fixture time only and never affects native capture. Run `./scripts/run-simulator.sh --fixture-stream --preview-stream` to open the animated delayed-video checkpoint automatically; it fills the selected delay in real time. This lets you inspect the timeline and Loop switch without capturing microphone input. Normal launches still begin ready to record. `--fixture-capture` substitutes generated audio for capture in simulator workflow tests; it never requests microphone input. `--fail-second-start` injects one replacement failure in that harness. Preview arguments are ignored in Release builds.
 
 Files export remains paused after Save or Cancel. A new recording is disabled until the picker reports its result, and Saved is shown only for a confirmed success.
 

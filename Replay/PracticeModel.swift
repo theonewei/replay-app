@@ -27,6 +27,8 @@ final class PracticeModel: ObservableObject {
     @Published var audioExport: AudioExportRequest?
     @Published var selectedInput: String?
     let playback = PlaybackController()
+    let delayed = DelayedStreamModel()
+    @Published private(set) var isDelayedMode = false
     private let capture: any PracticeCapturing
     private let videoExport: any VideoExporting
     private let folder: URL
@@ -43,6 +45,8 @@ final class PracticeModel: ObservableObject {
     var mode: Mode {
         get { session.selectedMode }
         set {
+            guard !busy else { return }
+            if newValue == .audio { isDelayedMode = false }
             send(.selectMode(newValue))
             Task { await prepare() }
         }
@@ -52,9 +56,9 @@ final class PracticeModel: ObservableObject {
     var player: AVPlayer? { take?.mode == mode ? playback.player : nil }
     var cameraSession: AVCaptureSession? { capture.cameraSession }
     var recording: Bool { session.state == .recording }
-    var busy: Bool { !session.canChangeMode }
+    var busy: Bool { !session.canChangeMode || delayed.isRunning }
     var canSave: Bool {
-        take?.mode == mode && (session.state == .paused || session.state == .replaying) && !saved
+        !isDelayedMode && !delayed.isRunning && take?.mode == mode && (session.state == .paused || session.state == .replaying) && !saved
     }
     var saved: Bool { take != nil && savedTakeID == take?.id }
     var recordLabel: String {
@@ -85,6 +89,7 @@ final class PracticeModel: ObservableObject {
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         catch { message = error.localizedDescription }
         playback.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
+        delayed.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
         playback.$isPlaying.dropFirst().sink { [weak self] playing in
             guard let self, !playing, let take = self.take else { return }
             self.send(.playbackStopped(take.id))
@@ -100,11 +105,15 @@ final class PracticeModel: ObservableObject {
     func prepare() async {
         guard session.canChangeMode else { return }
         #if DEBUG
-        if take == nil, ProcessInfo.processInfo.arguments.contains("--preview-audio") {
+        if take == nil, ProcessInfo.processInfo.arguments.contains("--preview-audio") || ProcessInfo.processInfo.arguments.contains("--preview-video") {
             do {
-                let preview = RecordedTake(id: UUID(), mode: .audio, url: try PreviewMedia.makeAudio(in: folder))
+                let video = ProcessInfo.processInfo.arguments.contains("--preview-video")
+                let url: URL
+                if video { url = try await PreviewMedia.makeVideo(in: folder) }
+                else { url = try PreviewMedia.makeAudio(in: folder) }
+                let preview = RecordedTake(id: UUID(), mode: video ? .video : .audio, url: url)
                 take = preview
-                send(.loadTake(UUID(), takeID: preview.id, mode: .audio,
+                send(.loadTake(UUID(), takeID: preview.id, mode: preview.mode,
                                autoplay: !ProcessInfo.processInfo.arguments.contains("--preview-paused")))
             } catch { message = error.localizedDescription }
             return
@@ -117,7 +126,7 @@ final class PracticeModel: ObservableObject {
         previewTask = Task { [weak self] in
             guard let self else { return }
             do {
-                if mode == .video && self.take?.mode != .video {
+                if mode == .video && self.take?.mode != .video && !self.isDelayedMode {
                     try await self.capture.prepareVideo(position: self.position)
                     guard !Task.isCancelled, self.previewGeneration == generation, self.session.canChangeMode else { return }
                     self.cameraReady = true
@@ -140,6 +149,7 @@ final class PracticeModel: ObservableObject {
     }
 
     func toggleRecording() {
+        guard !isDelayedMode, !delayed.isRunning else { return }
         if session.canStop { send(.stop) }
         else if session.canRecord { send(.record(UUID())) }
     }
@@ -152,6 +162,21 @@ final class PracticeModel: ObservableObject {
     func save() {
         guard canSave else { return }
         send(.export(UUID()))
+    }
+
+    func setDelayedMode(_ enabled: Bool) {
+        guard mode == .video, !busy else { return }
+        send(.pause)
+        isDelayedMode = enabled
+        Task { await prepare() }
+    }
+
+    func startDelayedStream() async {
+        guard mode == .video, isDelayedMode, session.canChangeMode, !delayed.isRunning else { return }
+        send(.pause)
+        await prepare()
+        guard mode == .video, isDelayedMode, session.canChangeMode, UIApplication.shared.applicationState == .active else { return }
+        delayed.start()
     }
 
     func completeAudioExport(id: UUID, outcome: ExportOutcome) {
@@ -179,7 +204,7 @@ final class PracticeModel: ObservableObject {
 
     private func send(_ event: PracticeSession.Event) {
         let effects = session.handle(event)
-        UIApplication.shared.isIdleTimerDisabled = session.state == .recording
+        UIApplication.shared.isIdleTimerDisabled = session.state == .recording || delayed.isRunning
         for effect in effects { perform(effect) }
     }
 
@@ -317,6 +342,7 @@ final class PracticeModel: ObservableObject {
     }
 
     func suspend() {
+        delayed.stop()
         previewTask?.cancel()
         previewGeneration = UUID()
         send(.suspend)

@@ -3,7 +3,94 @@ import Combine
 import CoreVideo
 import Testing
 import XCTest
+import UIKit
 @testable import Replay
+
+@Suite(.serialized)
+@MainActor
+struct DelayedStreamTests {
+    private func started(_ model: DelayedStreamModel) async {
+        let ready = XCTestExpectation(description: "Stream enters buffering")
+        let subscription = model.$state.filter { $0 == .buffering }.prefix(1).sink { _ in ready.fulfill() }
+        model.start()
+        #expect(await XCTWaiter.fulfillment(of: [ready], timeout: 5) == .completed)
+        withExtendedLifetime(subscription) {}
+    }
+
+    @Test func stopRestartAndStaleFrames() async throws {
+        let driver = ControlledStreamDriver()
+        let model = DelayedStreamModel(driver: driver)
+        defer { model.stop() }
+        #expect(model.delay == 15)
+        await started(model)
+        let first = try #require(await driver.latestID)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).jpegData(withCompressionQuality: 0.6) { _ in }
+        await driver.emit(first, update: StreamUpdate(data: image, buffered: 15, measuredDelay: 15.02, error: nil))
+        model.poll()
+        #expect(model.state == .streaming)
+        #expect(model.image != nil)
+        #expect(model.measuredDelay == 15.02)
+        model.stop()
+        #expect(model.image == nil)
+        #expect(!model.isRunning)
+        await started(model)
+        await driver.emit(first, update: StreamUpdate(data: image, buffered: 15, measuredDelay: 15, error: nil))
+        model.poll()
+        #expect(model.state == .buffering)
+        #expect(model.image == nil)
+        let second = try #require(await driver.latestID)
+        await driver.emit(second, update: StreamUpdate(data: nil, buffered: 0, measuredDelay: nil, error: "Interrupted"))
+        model.poll()
+        #expect(model.state == .failed("Interrupted"))
+        #expect(!model.isRunning)
+        #expect(model.image == nil)
+    }
+
+    @Test func stopDuringPreparationIgnoresLateStart() async throws {
+        let entered = XCTestExpectation(description: "Driver start is pending")
+        let driver = ControlledStreamDriver(entered: entered)
+        let model = DelayedStreamModel(driver: driver)
+        model.start()
+        #expect(await XCTWaiter.fulfillment(of: [entered], timeout: 5) == .completed)
+        model.stop()
+        await driver.releaseStart()
+        #expect(model.state == .stopped)
+        #expect(!model.isRunning)
+        #expect(model.image == nil)
+    }
+
+    @Test func startFailureIsRecoverable() async {
+        let driver = ControlledStreamDriver(fails: true)
+        let model = DelayedStreamModel(driver: driver)
+        let failed = XCTestExpectation(description: "Driver failure is shown")
+        let subscription = model.$state.filter { $0 == .failed("Camera unavailable") }.prefix(1).sink { _ in failed.fulfill() }
+        model.start()
+        #expect(await XCTWaiter.fulfillment(of: [failed], timeout: 5) == .completed)
+        #expect(!model.isRunning)
+        #expect(model.image == nil)
+        withExtendedLifetime(subscription) {}
+    }
+}
+
+private actor ControlledStreamDriver: DelayedVideoCapturing {
+    var latestID: UUID?
+    private var mailboxes: [UUID: StreamMailbox] = [:]
+    private let entered: XCTestExpectation?
+    private let fails: Bool
+    private var continuation: CheckedContinuation<Void, Never>?
+    init(entered: XCTestExpectation? = nil, fails: Bool = false) { self.entered = entered; self.fails = fails }
+    func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws {
+        latestID = id
+        mailboxes[id] = mailbox
+        if fails { throw PracticeError("Camera unavailable") }
+        if let entered {
+            await withCheckedContinuation { continuation in self.continuation = continuation; entered.fulfill() }
+        }
+    }
+    func releaseStart() { continuation?.resume(); continuation = nil }
+    func emit(_ id: UUID, update: StreamUpdate) { mailboxes[id]?.put(update) }
+    func stop(id: UUID) async {}
+}
 
 @Suite(.serialized)
 @MainActor
@@ -77,6 +164,31 @@ struct PracticeModelTests {
         previousCallback?(.failure(PracticeError("Late callback")))
         #expect(model.take == previous)
         #expect(model.session.state == .paused)
+    }
+
+    @Test(arguments: [RecordingMode.audio, .video]) func delayedModePreservesTheRetainedTake(mode: RecordingMode) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let model = PracticeModel(capture: capture, storage: root)
+        defer { model.playback.clear() }
+        model.mode = mode
+        if mode == .video { capture.fixture = try await videoFixture(in: root) }
+        try await complete(model, capture: capture)
+        let original = try #require(model.take)
+        model.mode = .video
+        model.setDelayedMode(true)
+        #expect(!model.canSave)
+        model.toggleRecording()
+        #expect(capture.requestCount == 1)
+        #expect(!model.playback.isPlaying)
+        #expect(model.take == original)
+        #expect(FileManager.default.fileExists(atPath: original.url.path))
+        model.setDelayedMode(false)
+        model.mode = mode
+        #expect(!model.isDelayedMode)
+        #expect(model.take == original)
+        #expect(model.canSave)
     }
 
     @Test func backgroundFinalizationDoesNotResumePlayback() async throws {
