@@ -82,6 +82,7 @@
 				<string>00000000000000000000064A</string>
 				<string>000000000000000000000654</string>
 				<string>00000000000000000000065E</string>
+				<string>0000000000000000000006A4</string>
 			</array>
 			<key>path</key>
 			<string>Replay</string>
@@ -150,6 +151,7 @@
 				<string>00000000000000000000064B</string>
 				<string>000000000000000000000655</string>
 				<string>00000000000000000000065F</string>
+				<string>0000000000000000000006A5</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -457,6 +459,7 @@
 				<string>00000000000000000000058C</string>
 				<string>0000000000000000000005E6</string>
 				<string>000000000000000000000668</string>
+				<string>0000000000000000000006AE</string>
 			</array>
 			<key>path</key>
 			<string>ReplayTests</string>
@@ -489,6 +492,7 @@
 				<string>00000000000000000000058D</string>
 				<string>0000000000000000000005E7</string>
 				<string>000000000000000000000669</string>
+				<string>0000000000000000000006AF</string>
 			</array>
 			<key>runOnlyForDeploymentPostprocessing</key>
 			<string>0</string>
@@ -1069,6 +1073,42 @@
 			<string>PBXBuildFile</string>
 			<key>fileRef</key>
 			<string>000000000000000000000668</string>
+		</dict>
+		<key>0000000000000000000006A4</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedClipEncoder.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>0000000000000000000006A5</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>0000000000000000000006A4</string>
+		</dict>
+		<key>0000000000000000000006AE</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXFileReference</string>
+			<key>lastKnownFileType</key>
+			<string>sourcecode.swift</string>
+			<key>path</key>
+			<string>DelayedClipTests.swift</string>
+			<key>sourceTree</key>
+			<string>&lt;group&gt;</string>
+		</dict>
+		<key>0000000000000000000006AF</key>
+		<dict>
+			<key>isa</key>
+			<string>PBXBuildFile</string>
+			<key>fileRef</key>
+			<string>0000000000000000000006AE</string>
 		</dict>
 	</dict>
 	<key>rootObject</key>

@@ -7,6 +7,21 @@ import Testing
 #endif
 
 struct PracticeSessionTests {
+    @Test func discardOnlyRemovesTheMatchingIdleTake() {
+        var session = PracticeSession()
+        let take = UUID()
+        completeTake(&session, take: take)
+        #expect(session.handle(.discardTake(UUID())).isEmpty)
+        let export = UUID()
+        _ = session.handle(.export(export))
+        #expect(session.handle(.discardTake(take)).isEmpty)
+        #expect(session.takeID == take)
+        _ = session.handle(.exportFinished(export))
+        #expect(session.handle(.discardTake(take)) == [.replaceTake(take)])
+        #expect(session.state == .ready)
+        #expect(session.takeID == nil)
+    }
+
     private func completeTake(_ session: inout PracticeSession, take: UUID) {
         let operation = UUID()
         _ = session.handle(.record(operation))

@@ -99,32 +99,42 @@ final class FixtureCaptureDriver: PracticeCapturing {
 actor FixtureDelayedVideoCapture: DelayedVideoCapturing {
     private var id: UUID?
     private var task: Task<Void, Never>?
+    private var buffer: DelayedFrameBuffer?
 
     func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws {
         self.id = id
-        task = Task { [weak self] in
-            var buffer = DelayedFrameBuffer(delay: delay)
-            let began = ProcessInfo.processInfo.systemUptime
-            let speed = ProcessInfo.processInfo.arguments.contains("--fast-stream") ? 5.0 : 1.0
-            while !Task.isCancelled {
-                let time = (ProcessInfo.processInfo.systemUptime - began) * speed
-                let data = await Self.image(time: time)
-                do {
-                    let frame = try buffer.append(time: time, data: data)
-                    mailbox.put(StreamUpdate(data: frame?.data, buffered: buffer.buffered, measuredDelay: frame.map { time - $0.time }, error: nil))
-                } catch { return }
-                try? await Task.sleep(for: .milliseconds(67))
-            }
-            await self?.finished(id: id)
+        buffer = DelayedFrameBuffer(delay: delay)
+        task = Task { [weak self] in await self?.produce(id: id, mailbox: mailbox) }
+    }
+
+    private func produce(id: UUID, mailbox: StreamMailbox) async {
+        let began = ProcessInfo.processInfo.systemUptime
+        let speed = ProcessInfo.processInfo.arguments.contains("--fast-stream") ? 5.0 : 1.0
+        while self.id == id, !Task.isCancelled {
+            let time = (ProcessInfo.processInfo.systemUptime - began) * speed
+            let data = await Self.image(time: time)
+            guard self.id == id, !Task.isCancelled, buffer != nil else { return }
+            do {
+                let frame = try buffer?.append(time: time, data: data)
+                mailbox.put(StreamUpdate(data: frame?.data, buffered: buffer?.buffered ?? 0,
+                                         measuredDelay: frame.map { time - $0.time }, error: nil))
+            } catch { return }
+            try? await Task.sleep(for: .milliseconds(67))
         }
     }
 
-    private func finished(id: UUID) { if self.id == id { self.id = nil } }
+    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip {
+        guard self.id == id, let buffer else { throw PracticeError("The stream is no longer available.") }
+        let clip = try buffer.clip()
+        await stop(id: id)
+        return clip
+    }
 
     func stop(id: UUID) async {
         guard self.id == id else { return }
         task?.cancel()
         task = nil
+        buffer = nil
         self.id = nil
     }
 

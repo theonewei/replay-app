@@ -89,12 +89,58 @@ private actor ControlledStreamDriver: DelayedVideoCapturing {
     }
     func releaseStart() { continuation?.resume(); continuation = nil }
     func emit(_ id: UUID, update: StreamUpdate) { mailboxes[id]?.put(update) }
+    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip { throw PracticeError("No test clip") }
     func stop(id: UUID) async {}
 }
 
 @Suite(.serialized)
 @MainActor
 struct PracticeModelTests {
+    @Test func failedClipPreservesThePreviousRecording() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let driver = ClipTestDriver(clip: try DelayedClipTests.fixture(delay: 15))
+        let stream = DelayedStreamModel(driver: driver, encoder: FailingClipEncoder())
+        let model = PracticeModel(capture: capture, storage: root, delayed: stream)
+        defer { model.playback.clear(); stream.stop() }
+        try await complete(model, capture: capture)
+        let original = try #require(model.take)
+        model.mode = .video
+        model.setDelayedMode(true)
+        await model.startDelayedStream()
+        let started = XCTestExpectation(description: "Stream buffering")
+        let subscription = stream.$state.filter { $0 == .buffering }.prefix(1).sink { _ in started.fulfill() }
+        #expect(await XCTWaiter.fulfillment(of: [started], timeout: 5) == .completed)
+        await driver.ready()
+        stream.poll()
+        let failed = XCTestExpectation(description: "Clip failure is recoverable")
+        let failure = stream.$state.filter { $0 == .failed("Encoding failed") }.prefix(1).sink { _ in failed.fulfill() }
+        model.clipDelayedStream()
+        #expect(await XCTWaiter.fulfillment(of: [failed], timeout: 5) == .completed)
+        #expect(model.take == original)
+        #expect(FileManager.default.fileExists(atPath: original.url.path))
+        #expect(await driver.active == false)
+        withExtendedLifetime((subscription, failure)) {}
+    }
+
+    @Test func videoStartsWithBackCameraAndFlipIsExplicit() async {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let model = PracticeModel(capture: capture, storage: root)
+        model.mode = .video
+        await model.prepare()
+        #expect(capture.preparedPositions.last == .back)
+        await model.flipCamera()
+        #expect(capture.preparedPositions.last == .front)
+        await model.flipCamera()
+        #expect(capture.preparedPositions.last == .back)
+        await start(model, capture: capture)
+        #expect(capture.recordedPosition == .back)
+        model.suspend()
+    }
+
     private func waitFor(_ model: PracticeModel, state: PracticeSession.State, action: () -> Void) async {
         let ready = XCTestExpectation(description: "Session reaches \(state)")
         let observer = model.$session.dropFirst().filter { $0.state == state }.prefix(1).sink { _ in ready.fulfill() }
@@ -319,6 +365,8 @@ struct PracticeModelTests {
 private final class ControlledCapture: PracticeCapturing {
     var cameraSession: AVCaptureSession? { nil }
     var requestCount = 0
+    var preparedPositions: [AVCaptureDevice.Position] = []
+    var recordedPosition: AVCaptureDevice.Position?
     var stopCount = 0
     var failStart = false
     var fixture: URL?
@@ -327,12 +375,13 @@ private final class ControlledCapture: PracticeCapturing {
     var finished: ((Result<URL, Error>) -> Void)?
     private var url: URL?
     func inputs(prepare: Bool) -> [AVAudioSessionPortDescription] { [] }
-    func prepareVideo(position: AVCaptureDevice.Position) async throws {}
+    func prepareVideo(position: AVCaptureDevice.Position) async throws { preparedPositions.append(position) }
     func stopPreview() async {}
     func start(id: UUID, mode: RecordingMode, url: URL, inputID: String?, position: AVCaptureDevice.Position,
                started: @escaping @MainActor () -> Void,
                finished: @escaping @MainActor (Result<URL, Error>) -> Void) async throws {
         requestCount += 1
+        recordedPosition = position
         if failStart { throw PracticeError("Capture failed") }
         self.url = url
         self.started = started

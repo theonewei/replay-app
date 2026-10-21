@@ -1,6 +1,42 @@
 import XCTest
 
 final class LaunchTests: XCTestCase {
+    func testDelayedClipCanReviewSaveAndDiscard() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-capture", "--fixture-stream", "--fast-stream"]
+        app.launch()
+        app.buttons["Video"].tap()
+        app.buttons["Delayed stream"].tap()
+        app.buttons["stream.startStop"].tap()
+        let clip = app.buttons["stream.clip"]
+        XCTAssertTrue(clip.waitForExistence(timeout: 5))
+        let filled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: clip)
+        XCTAssertEqual(XCTWaiter.wait(for: [filled], timeout: 10), .completed)
+        XCTAssertEqual(clip.label, "Clip last 15 seconds")
+        clip.tap()
+        let done = app.buttons["video.done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["playback.duration"].label, "0:15")
+        XCTAssertEqual(app.buttons["playback.playPause"].label, "Play")
+        app.sliders["playback.timeline"].adjust(toNormalizedSliderPosition: 0.5)
+        XCTAssertNotEqual(app.staticTexts["playback.elapsed"].label, "0:00")
+        let save = app.buttons["video.save"]
+        save.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = springboard.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Allow'")).firstMatch
+        if allow.waitForExistence(timeout: 2) { allow.tap() }
+        let saved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Saved'"), object: save)
+        XCTAssertEqual(XCTWaiter.wait(for: [saved], timeout: 15), .completed)
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertEqual(app.buttons["playback.playPause"].label, "Play")
+        app.buttons["stream.discardClip"].tap()
+        let start = app.buttons["stream.startStop"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        XCTAssertEqual(start.label, "Start stream")
+        XCTAssertFalse(app.sliders["playback.timeline"].exists)
+    }
+
     func testFullscreenVideoPreservesPlaybackAndRotates() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -102,11 +138,19 @@ final class LaunchTests: XCTestCase {
         XCTAssertNotEqual(app.staticTexts["playback.elapsed"].label, "0:00")
         XCTAssertEqual(app.staticTexts["playback.duration"].label, "0:12")
         timeline.adjust(toNormalizedSliderPosition: 0.95)
+        print("End seek landed at \(app.staticTexts["playback.elapsed"].label)")
         play.tap()
         let ended = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == '0:12'"), object: app.staticTexts["playback.elapsed"]
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 5), .completed)
+        let endResult = XCTWaiter.wait(for: [ended], timeout: 5)
+        if endResult != .completed {
+            print("End check: elapsed=\(app.staticTexts["playback.elapsed"].label), control=\(play.label), status=\(app.staticTexts["practice.status"].label)")
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        XCTAssertEqual(endResult, .completed)
         XCTAssertEqual(play.label, "Play")
     }
 

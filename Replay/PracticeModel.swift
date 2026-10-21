@@ -27,7 +27,8 @@ final class PracticeModel: ObservableObject {
     @Published var audioExport: AudioExportRequest?
     @Published var selectedInput: String?
     let playback = PlaybackController()
-    let delayed = DelayedStreamModel()
+    let delayed: DelayedStreamModel
+    @Published private(set) var delayedClipID: UUID?
     @Published private(set) var isDelayedMode = false
     private let capture: any PracticeCapturing
     private let videoExport: any VideoExporting
@@ -40,7 +41,7 @@ final class PracticeModel: ObservableObject {
     private var subscriptions = Set<AnyCancellable>()
     private var readinessSubscription: AnyCancellable?
     private var observers: [NSObjectProtocol] = []
-    private var position: AVCaptureDevice.Position = .front
+    private var position: AVCaptureDevice.Position = .back
 
     var mode: Mode {
         get { session.selectedMode }
@@ -56,9 +57,10 @@ final class PracticeModel: ObservableObject {
     var player: AVPlayer? { take?.mode == mode ? playback.player : nil }
     var cameraSession: AVCaptureSession? { capture.cameraSession }
     var recording: Bool { session.state == .recording }
-    var busy: Bool { !session.canChangeMode || delayed.isRunning }
+    var busy: Bool { !session.canChangeMode || delayed.isBusy }
+    var reviewingDelayedClip: Bool { isDelayedMode && delayed.state == .reviewing && delayedClipID == take?.id && take != nil }
     var canSave: Bool {
-        !isDelayedMode && !delayed.isRunning && take?.mode == mode && (session.state == .paused || session.state == .replaying) && !saved
+        (!isDelayedMode || reviewingDelayedClip) && !delayed.isBusy && take?.mode == mode && (session.state == .paused || session.state == .replaying) && !saved
     }
     var saved: Bool { take != nil && savedTakeID == take?.id }
     var recordLabel: String {
@@ -76,7 +78,8 @@ final class PracticeModel: ObservableObject {
     }
     var inputName: String { inputs.first { $0.uid == selectedInput }?.portName ?? "System microphone" }
 
-    init(capture: (any PracticeCapturing)? = nil, videoExport: (any VideoExporting)? = nil, storage: URL? = nil) {
+    init(capture: (any PracticeCapturing)? = nil, videoExport: (any VideoExporting)? = nil, storage: URL? = nil, delayed: DelayedStreamModel? = nil) {
+        self.delayed = delayed ?? DelayedStreamModel()
         #if DEBUG
         self.capture = capture ?? (ProcessInfo.processInfo.arguments.contains("--fixture-capture") ? FixtureCaptureDriver() : SystemCaptureDriver())
         #else
@@ -89,7 +92,8 @@ final class PracticeModel: ObservableObject {
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         catch { message = error.localizedDescription }
         playback.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
-        delayed.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
+        self.delayed.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &subscriptions)
+        self.delayed.onClipReady = { [weak self] url in self?.acceptDelayedClip(url) ?? false }
         playback.$isPlaying.dropFirst().sink { [weak self] playing in
             guard let self, !playing, let take = self.take else { return }
             self.send(.playbackStopped(take.id))
@@ -172,11 +176,38 @@ final class PracticeModel: ObservableObject {
     }
 
     func startDelayedStream() async {
-        guard mode == .video, isDelayedMode, session.canChangeMode, !delayed.isRunning else { return }
+        guard mode == .video, isDelayedMode, session.canChangeMode, !delayed.isBusy else { return }
         send(.pause)
         await prepare()
         guard mode == .video, isDelayedMode, session.canChangeMode, UIApplication.shared.applicationState == .active else { return }
         delayed.start()
+    }
+
+    func clipDelayedStream() {
+        guard isDelayedMode, mode == .video, delayed.canClip, session.canRecord else { return }
+        delayed.makeClip(to: folder.appendingPathComponent("Clip-\(UUID().uuidString).mov"))
+    }
+
+    private func acceptDelayedClip(_ url: URL) -> Bool {
+        guard isDelayedMode, mode == .video, session.canRecord,
+              url.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return false }
+        let previous = take
+        readinessSubscription = nil
+        playback.clear()
+        let clip = RecordedTake(id: UUID(), mode: .video, url: url)
+        take = clip
+        delayedClipID = clip.id
+        savedTakeID = nil
+        send(.loadTake(UUID(), takeID: clip.id, mode: .video, autoplay: false))
+        if let previous { deleteFile(previous.url) }
+        return true
+    }
+
+    func discardDelayedClip() {
+        guard reviewingDelayedClip, session.canChangeMode, let id = take?.id else { return }
+        send(.discardTake(id))
+        delayed.stop()
     }
 
     func completeAudioExport(id: UUID, outcome: ExportOutcome) {
@@ -245,6 +276,7 @@ final class PracticeModel: ObservableObject {
                 deleteFile(old.url)
             }
             savedTakeID = nil
+            delayedClipID = nil
         case .preparePlayback(let id, let takeID):
             guard let take, take.id == takeID else { return }
             do {
@@ -342,7 +374,7 @@ final class PracticeModel: ObservableObject {
     }
 
     func suspend() {
-        delayed.stop()
+        if delayed.isBusy { delayed.stop() }
         previewTask?.cancel()
         previewGeneration = UUID()
         send(.suspend)

@@ -4,21 +4,26 @@ import UIKit
 
 @MainActor
 final class DelayedStreamModel: ObservableObject {
-    enum State: Equatable { case stopped, starting, buffering, streaming, failed(String) }
+    enum State: Equatable { case stopped, starting, buffering, streaming, finishing, reviewing, failed(String) }
     @Published private(set) var state: State = .stopped
     @Published private(set) var image: UIImage?
     @Published private(set) var buffered = 0.0
     @Published private(set) var measuredDelay: Double?
     @Published var delay = 15
     var isRunning: Bool { state == .starting || state == .buffering || state == .streaming }
+    var isBusy: Bool { isRunning || state == .finishing }
+    var canClip: Bool { state == .streaming && buffered >= Double(delay) - 0.001 }
+    var onClipReady: ((URL) -> Bool)?
     private let driver: any DelayedVideoCapturing
+    private let encoder: any DelayedClipEncoding
     private var mailbox = StreamMailbox()
     private var id: UUID?
     private var timer: Timer?
     private var task: Task<Void, Never>?
     private var lastUpdate = ProcessInfo.processInfo.systemUptime
 
-    init(driver: (any DelayedVideoCapturing)? = nil) {
+    init(driver: (any DelayedVideoCapturing)? = nil, encoder: any DelayedClipEncoding = DelayedClipEncoder()) {
+        self.encoder = encoder
         #if DEBUG
         self.driver = driver ?? (ProcessInfo.processInfo.arguments.contains("--fixture-stream") ? FixtureDelayedVideoCapture() : DelayedVideoCapture())
         #else
@@ -27,7 +32,7 @@ final class DelayedStreamModel: ObservableObject {
     }
 
     func start() {
-        guard !isRunning, (5...30).contains(delay) else { return }
+        guard !isBusy, (5...30).contains(delay) else { return }
         let id = UUID()
         self.id = id
         mailbox = StreamMailbox()
@@ -92,6 +97,39 @@ final class DelayedStreamModel: ObservableObject {
         UIApplication.shared.isIdleTimerDisabled = false
         let driver = self.driver
         if let oldID { Task { await driver.stop(id: oldID) } }
+    }
+
+    @discardableResult
+    func makeClip(to url: URL) -> Task<Void, Never>? {
+        guard canClip, let id, !FileManager.default.fileExists(atPath: url.path) else { return nil }
+        timer?.invalidate()
+        timer = nil
+        state = .finishing
+        UIApplication.shared.isIdleTimerDisabled = false
+        let driver = self.driver
+        let encoder = self.encoder
+        task = Task { [weak self] in
+            do {
+                let clip = try await driver.clip(id: id)
+                try Task.checkCancellation()
+                try await encoder.encode(clip, to: url)
+                guard let self, self.id == id, !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: url)
+                    return
+                }
+                guard self.onClipReady?(url) == true else { throw PracticeError("The clip could not be opened. Please try again.") }
+                self.id = nil
+                self.image = nil
+                self.state = .reviewing
+            } catch {
+                await driver.stop(id: id)
+                try? FileManager.default.removeItem(at: url)
+                guard let self, self.id == id else { return }
+                self.stop()
+                self.state = .failed(error.localizedDescription)
+            }
+        }
+        return task
     }
 
     isolated deinit {

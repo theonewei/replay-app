@@ -7,6 +7,23 @@ import Testing
 #endif
 
 struct DelayedFrameBufferTests {
+    @Test(arguments: (5...30).map(Double.init)) func clipContainsOnlyTheLatestWindow(delay: Double) throws {
+        var buffer = DelayedFrameBuffer(delay: delay)
+        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip() }
+        for frame in 0..<Int((delay + 3) * 15) {
+            _ = try buffer.append(time: 100 + Double(frame) / 15, data: Data([UInt8(frame % 256)]))
+        }
+        let clip = try buffer.clip()
+        #expect(abs(clip.duration - delay) < 0.00001)
+        #expect(clip.frames.first?.time ?? .infinity <= clip.startTime + 1e-9)
+        #expect(clip.frames[1].time > clip.startTime)
+        #expect(clip.frames.last?.time == clip.endTime)
+        #expect(clip.frames.count <= Int(delay * 15) + 2)
+        buffer.reset()
+        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip() }
+        #expect(!clip.frames.isEmpty) // Immutable snapshot survives capture cleanup.
+    }
+
     @Test(arguments: (5...30).map(Double.init)) func delayUsesCaptureTimeAndStaysBounded(delay: Double) throws {
         var buffer = DelayedFrameBuffer(delay: delay)
         for frame in 0..<3_000 {

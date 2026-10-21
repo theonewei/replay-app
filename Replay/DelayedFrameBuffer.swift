@@ -7,7 +7,13 @@ struct DelayedFrameBuffer {
         let time: Double
         let data: Data
     }
-    enum BufferError: Error { case invalidTimestamp, capacityExceeded }
+    struct Clip: Sendable {
+        let frames: [Frame]
+        let startTime: Double
+        let endTime: Double
+        var duration: Double { endTime - startTime }
+    }
+    enum BufferError: Error { case invalidTimestamp, capacityExceeded, insufficientHistory }
     let delay: Double
     let byteLimit: Int
     let frameLimit: Int
@@ -33,15 +39,24 @@ struct DelayedFrameBuffer {
         lastTime = time
         buffered = min(delay, time - (firstTime ?? time))
         let target = time - delay
-        var selected: Frame?
-        while let first = frames.first, first.time <= target + 1e-9 {
-            selected = frames.removeFirst()
-            bytes -= first.data.count
+        // Keep one predecessor at the left boundary. It supplies the exact
+        // first frame of a clip when the chosen start falls between samples.
+        while frames.count > 1, frames[1].time <= target + 1e-9 {
+            bytes -= frames.removeFirst().data.count
         }
+        let selected = frames.first.flatMap { $0.time <= target + 1e-9 ? $0 : nil }
         guard data.count <= byteLimit - bytes, frames.count < frameLimit else { throw BufferError.capacityExceeded }
         frames.append(Frame(time: time, data: data))
         bytes += data.count
         return selected
+    }
+
+    func clip() throws -> Clip {
+        guard buffered >= delay - 1e-9, let lastTime,
+              let first = frames.first, first.time <= lastTime - delay + 1e-9 else {
+            throw BufferError.insufficientHistory
+        }
+        return Clip(frames: frames, startTime: lastTime - delay, endTime: lastTime)
     }
 
     mutating func reset() {

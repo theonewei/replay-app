@@ -39,7 +39,12 @@ struct PracticeView: View {
                 #endif
             }
             .onChange(of: model.playback.isReady) { _, ready in
-                if ready, model.mode == .video, !model.isDelayedMode { fullscreen = true }
+                if ready, model.mode == .video, !model.isDelayedMode || model.reviewingDelayedClip { fullscreen = true }
+            }
+            .onChange(of: model.delayed.canClip) { _, ready in
+                #if DEBUG
+                if ready, ProcessInfo.processInfo.arguments.contains("--preview-clip") { model.clipDelayedStream() }
+                #endif
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { model.suspend() }
@@ -89,7 +94,7 @@ struct PracticeView: View {
 
     private var media: some View {
         Group {
-            if model.isDelayedMode, model.mode == .video {
+            if model.isDelayedMode, model.mode == .video, !model.reviewingDelayedClip {
                 DelayedStreamSurface(stream: model.delayed)
             } else if let player = model.player {
                 ZStack {
@@ -125,7 +130,18 @@ struct PracticeView: View {
 
     @ViewBuilder private var actions: some View {
         if model.isDelayedMode, model.mode == .video {
-            DelayedStreamControls(stream: model.delayed, start: { Task { await model.startDelayedStream() } })
+            if model.reviewingDelayedClip {
+                PlaybackControls(playback: model.playback, togglePlayback: model.togglePlayback).disabled(model.busy)
+                HStack {
+                    Button(model.saved ? "Saved" : "Save to Photos") { model.save() }
+                        .disabled(!model.canSave).accessibilityIdentifier("stream.saveClip")
+                    Spacer()
+                    Button("Discard clip", role: .destructive) { model.discardDelayedClip() }
+                        .disabled(model.busy).accessibilityIdentifier("stream.discardClip")
+                }.frame(minHeight: 44)
+            }
+            DelayedStreamControls(stream: model.delayed, start: { Task { await model.startDelayedStream() } }, clip: model.clipDelayedStream)
+                .disabled(model.session.state == .exporting)
         } else {
             if model.player != nil {
                 PlaybackControls(playback: model.playback, togglePlayback: model.togglePlayback)
@@ -190,10 +206,15 @@ struct FullscreenVideoView: View {
             HStack {
                 Button("Done", action: close).accessibilityIdentifier("video.done").frame(minHeight: 44)
                 Spacer()
+                if model.reviewingDelayedClip {
+                    Button("Discard", role: .destructive) { model.discardDelayedClip(); close() }
+                        .disabled(model.busy).accessibilityIdentifier("stream.discardClip")
+                }
                 Button(model.saved ? "Saved" : "Save") { model.save() }.disabled(!model.canSave)
+                    .accessibilityIdentifier("video.save")
             }
             if let player = model.player { VideoPlaybackSurface(player: player) }
-            PlaybackControls(playback: model.playback, togglePlayback: model.togglePlayback)
+            PlaybackControls(playback: model.playback, togglePlayback: model.togglePlayback).disabled(model.busy)
         }
         .padding()
         .background(.black)

@@ -26,6 +26,7 @@ final class StreamMailbox: @unchecked Sendable {
 
 protocol DelayedVideoCapturing: Sendable {
     func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws
+    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip
     func stop(id: UUID) async
 }
 
@@ -56,7 +57,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                     do {
                         self.session.sessionPreset = .vga640x480
                         for input in self.session.inputs { self.session.removeInput(input) }
-                        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
+                        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
                             throw PracticeError("No camera is available on this device.")
                         }
                         let input = try AVCaptureDeviceInput(device: device)
@@ -148,6 +149,25 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
             queue.async {
                 if self.activeID == id { self.clear() }
                 continuation.resume()
+            }
+        }
+    }
+
+    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                guard self.activeID == id else {
+                    continuation.resume(throwing: PracticeError("The stream is no longer available. Start it again to capture a clip."))
+                    return
+                }
+                do {
+                    let clip = try self.buffer.clip()
+                    self.clear() // Capture has actually stopped before returning the snapshot.
+                    continuation.resume(returning: clip)
+                } catch {
+                    self.clear()
+                    continuation.resume(throwing: PracticeError("Wait for the selected delay to fill before clipping."))
+                }
             }
         }
     }

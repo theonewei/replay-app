@@ -37,6 +37,7 @@ struct PracticeSession {
         case suspend
         case resume
         case loadTake(UUID, takeID: UUID, mode: RecordingMode, autoplay: Bool)
+        case discardTake(UUID)
     }
 
     enum Effect: Equatable {
@@ -205,6 +206,14 @@ struct PracticeSession {
             autoplay = shouldAutoplay
             state = .finishing
             return [.preparePlayback(id, take)]
+
+        case .discardTake(let id):
+            guard canChangeMode, takeID == id else { return [] }
+            takeID = nil
+            takeMode = nil
+            operationID = nil
+            state = .ready
+            return [.replaceTake(id)]
 
         case .dismissError:
             guard case .recoverableError = state else { return [] }
