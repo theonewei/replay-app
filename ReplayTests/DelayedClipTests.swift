@@ -135,7 +135,12 @@ struct DelayedClipTests {
             await wait(for: model.$session, matching: { $0.state == .paused }) { model.save(); model.save() }
             #expect(exporter.calls == 2 && model.saved)
         } else { #expect(exporter.calls == 0) }
-        model.discardDelayedClip()
+        if saveRequested {
+            model.discardDelayedClip()
+        } else {
+            model.setDelayedMode(false)
+            model.clearTake()
+        }
         #expect(model.take == nil)
         #expect(!FileManager.default.fileExists(atPath: url.path))
         #expect(FileManager.default.fileExists(atPath: exporter.destination.path) == saveRequested)

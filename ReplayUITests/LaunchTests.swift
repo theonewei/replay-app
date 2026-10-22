@@ -1,6 +1,28 @@
 import XCTest
 
 final class LaunchTests: XCTestCase {
+    func testClearAudioAndFullscreenVideoReturnsToReady() {
+        continueAfterFailure = false
+        for video in [false, true] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--fixture-capture", video ? "--preview-video" : "--preview-audio"]
+            app.launch()
+            let clear = app.buttons[video ? "video.clear" : "practice.clear"]
+            XCTAssertTrue(clear.waitForExistence(timeout: 15))
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: clear)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+            clear.tap()
+            let record = app.buttons["practice.record"]
+            XCTAssertTrue(record.waitForExistence(timeout: 5))
+            XCTAssertTrue(record.isEnabled)
+            XCTAssertEqual(record.label, "Record new take")
+            XCTAssertFalse(app.sliders["playback.timeline"].exists)
+            XCTAssertFalse(app.buttons["practice.save"].isEnabled)
+            XCTAssertFalse(app.buttons["video.done"].exists)
+            app.terminate()
+        }
+    }
+
     func testFrameRateSettingsPersistAcrossLaunches() {
         continueAfterFailure = false
         let app = XCUIApplication()

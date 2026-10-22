@@ -192,6 +192,56 @@ struct PracticeModelTests {
         await waitFor(model, state: .replaying) { capture.finish() }
     }
 
+    @Test(arguments: [RecordingMode.audio, .video]) func clearStopsPlaybackDeletesOnlyTheTemporaryTakeAndAllowsRecording(mode: RecordingMode) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let model = PracticeModel(capture: capture, storage: root)
+        model.mode = mode
+        if mode == .video { capture.fixture = try await videoFixture(in: root) }
+        try await complete(model, capture: capture)
+        let take = try #require(model.take)
+        let exported = root.appendingPathComponent("exported-copy")
+        try FileManager.default.copyItem(at: take.url, to: exported)
+        #expect(model.canClear && model.playback.isPlaying)
+        model.clearTake()
+        model.clearTake()
+        #expect(model.session.state == .ready)
+        #expect(model.take == nil && model.player == nil && !model.playback.isPlaying)
+        #expect(!model.canSave && !model.canClear && model.savedTakeID == nil)
+        #expect(!FileManager.default.fileExists(atPath: take.url.path))
+        #expect(FileManager.default.fileExists(atPath: exported.path))
+        capture.finished?(.success(take.url))
+        #expect(model.take == nil)
+        await start(model, capture: capture)
+        #expect(model.session.state == .preparing)
+        model.suspend()
+    }
+
+    @Test func clearIsUnavailableDuringExportAndCapturePreparation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let model = PracticeModel(capture: capture, storage: root)
+        defer { model.playback.clear() }
+        try await complete(model, capture: capture)
+        let take = try #require(model.take)
+        model.save()
+        let request = try #require(model.audioExport)
+        #expect(!model.canClear)
+        model.clearTake()
+        #expect(model.take == take && FileManager.default.fileExists(atPath: take.url.path))
+        model.completeAudioExport(id: request.id, outcome: .saved)
+        #expect(model.saved)
+        await start(model, capture: capture)
+        model.clearTake()
+        #expect(model.take == take && !model.canClear)
+        model.suspend()
+        #expect(model.canClear)
+        model.clearTake()
+        #expect(model.take == nil && !model.saved)
+    }
+
     @Test func earlyStopIsQueuedAndPlaybackWaitsForFinalization() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -42,6 +42,7 @@ final class PracticeModel: ObservableObject {
     private var readinessSubscription: AnyCancellable?
     private var observers: [NSObjectProtocol] = []
     private var position: AVCaptureDevice.Position = .back
+    private var didLoadPreview = false
 
     var mode: Mode {
         get { session.selectedMode }
@@ -62,6 +63,7 @@ final class PracticeModel: ObservableObject {
     var canSave: Bool {
         (!isDelayedMode || reviewingDelayedClip) && !delayed.isBusy && take?.mode == mode && (session.state == .paused || session.state == .replaying) && !saved
     }
+    var canClear: Bool { !busy && take != nil && take?.mode == mode && (!isDelayedMode || reviewingDelayedClip) }
     var saved: Bool { take != nil && savedTakeID == take?.id }
     var recordLabel: String {
         if session.state == .preparing { return "Cancel or stop recording" }
@@ -109,8 +111,9 @@ final class PracticeModel: ObservableObject {
     func prepare() async {
         guard session.canChangeMode else { return }
         #if DEBUG
-        if take == nil, ProcessInfo.processInfo.arguments.contains("--preview-audio") || ProcessInfo.processInfo.arguments.contains("--preview-video") {
+        if !didLoadPreview, take == nil, ProcessInfo.processInfo.arguments.contains("--preview-audio") || ProcessInfo.processInfo.arguments.contains("--preview-video") {
             do {
+                didLoadPreview = true
                 let video = ProcessInfo.processInfo.arguments.contains("--preview-video")
                 let url: URL
                 if video { url = try await PreviewMedia.makeVideo(in: folder) }
@@ -204,10 +207,18 @@ final class PracticeModel: ObservableObject {
         return true
     }
 
-    func discardDelayedClip() {
-        guard reviewingDelayedClip, session.canChangeMode, let id = take?.id else { return }
+    func clearTake() {
+        guard canClear, let id = take?.id else { return }
+        let wasDelayedClip = delayedClipID == id
+        message = nil
         send(.discardTake(id))
-        delayed.stop()
+        if wasDelayedClip { delayed.stop() }
+        Task { await prepare() }
+    }
+
+    func discardDelayedClip() {
+        guard reviewingDelayedClip else { return }
+        clearTake()
     }
 
     func completeAudioExport(id: UUID, outcome: ExportOutcome) {

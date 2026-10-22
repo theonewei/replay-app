@@ -170,9 +170,14 @@ struct PracticeView: View {
             if model.player != nil {
                 PlaybackControls(playback: model.playback, togglePlayback: model.togglePlayback)
                     .disabled(model.recording || model.busy)
-                if model.takeMode == .video {
-                    Button("Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right") { fullscreen = true }
-                        .accessibilityIdentifier("video.fullscreen")
+                HStack {
+                    if model.takeMode == .video {
+                        Button("Fullscreen", systemImage: "arrow.up.left.and.arrow.down.right") { fullscreen = true }
+                            .accessibilityIdentifier("video.fullscreen")
+                        Spacer()
+                    }
+                    Button("Clear", systemImage: "trash", role: .destructive) { model.clearTake() }
+                        .disabled(!model.canClear).frame(minHeight: 44).accessibilityIdentifier("practice.clear")
                 }
             }
             if model.mode == .audio {
@@ -233,6 +238,9 @@ struct FullscreenVideoView: View {
                 if model.reviewingDelayedClip {
                     Button("Discard", role: .destructive) { model.discardDelayedClip(); close() }
                         .disabled(model.busy).accessibilityIdentifier("stream.discardClip")
+                } else {
+                    Button("Clear", role: .destructive) { model.clearTake(); close() }
+                        .disabled(!model.canClear).frame(minHeight: 44).accessibilityIdentifier("video.clear")
                 }
                 Button(model.saved ? "Saved" : "Save") { model.save() }.disabled(!model.canSave)
                     .accessibilityIdentifier("video.save")
