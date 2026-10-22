@@ -10,9 +10,13 @@ final class DelayedStreamModel: ObservableObject {
     @Published private(set) var buffered = 0.0
     @Published private(set) var measuredDelay: Double?
     @Published var delay = 15
+    @Published private(set) var viewed = 0.0
+    @Published private(set) var isLive = false
+    private var viewedStart: Double?
+    private var viewedEnd: Double?
     var isRunning: Bool { state == .starting || state == .buffering || state == .streaming }
     var isBusy: Bool { isRunning || state == .finishing }
-    var canClip: Bool { state == .streaming && buffered >= Double(delay) - 0.001 }
+    var canClip: Bool { state == .streaming && viewed >= Double(delay) - 0.001 }
     var onClipReady: ((URL) -> Bool)?
     private let driver: any DelayedVideoCapturing
     private let encoder: any DelayedClipEncoding
@@ -32,7 +36,7 @@ final class DelayedStreamModel: ObservableObject {
     }
 
     func start() {
-        guard !isBusy, (5...30).contains(delay) else { return }
+        guard !isBusy, (5...60).contains(delay) else { return }
         let id = UUID()
         self.id = id
         mailbox = StreamMailbox()
@@ -42,15 +46,20 @@ final class DelayedStreamModel: ObservableObject {
         image = nil
         buffered = 0
         measuredDelay = nil
+        viewed = 0
+        viewedStart = nil
+        viewedEnd = nil
+        isLive = false
         let driver = self.driver
         let seconds = Double(delay)
+        let frameRate = VideoCaptureSettings.frameRate()
         task = Task { [weak self] in
             do {
-                try await driver.start(id: id, delay: seconds, mailbox: mailbox)
+                try await driver.start(id: id, delay: seconds, frameRate: frameRate, mailbox: mailbox)
                 guard let self, self.id == id, !Task.isCancelled else { await driver.stop(id: id); return }
                 self.state = .buffering
                 self.lastUpdate = ProcessInfo.processInfo.systemUptime
-                self.timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+                self.timer = Timer.scheduledTimer(withTimeInterval: 1.0 / Double(frameRate), repeats: true) { [weak self] _ in
                     Task { @MainActor [weak self] in self?.poll(id: id) }
                 }
             } catch {
@@ -76,7 +85,20 @@ final class DelayedStreamModel: ObservableObject {
         measuredDelay = update.measuredDelay
         if let data = update.data, let image = UIImage(data: data) {
             self.image = image
-            state = .streaming
+            isLive = update.isLive
+            if update.isLive {
+                state = .buffering
+                viewedStart = nil
+                viewedEnd = nil
+                viewed = 0
+            } else {
+                if let time = update.sourceTime {
+                    if viewedStart == nil || viewedEnd.map({ time < $0 || time - $0 > 1 }) == true { viewedStart = time }
+                    viewedEnd = time
+                    viewed = min(Double(delay), time - (viewedStart ?? time))
+                }
+                state = .streaming
+            }
         } else if update.buffered < Double(delay) {
             image = nil
             state = .buffering
@@ -93,6 +115,10 @@ final class DelayedStreamModel: ObservableObject {
         image = nil
         buffered = 0
         measuredDelay = nil
+        viewed = 0
+        viewedStart = nil
+        viewedEnd = nil
+        isLive = false
         state = .stopped
         UIApplication.shared.isIdleTimerDisabled = false
         let driver = self.driver
@@ -101,7 +127,7 @@ final class DelayedStreamModel: ObservableObject {
 
     @discardableResult
     func makeClip(to url: URL) -> Task<Void, Never>? {
-        guard canClip, let id, !FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard canClip, let id, let endingAt = viewedEnd, !FileManager.default.fileExists(atPath: url.path) else { return nil }
         timer?.invalidate()
         timer = nil
         state = .finishing
@@ -110,7 +136,7 @@ final class DelayedStreamModel: ObservableObject {
         let encoder = self.encoder
         task = Task { [weak self] in
             do {
-                let clip = try await driver.clip(id: id)
+                let clip = try await driver.clip(id: id, endingAt: endingAt)
                 try Task.checkCancellation()
                 try await encoder.encode(clip, to: url)
                 guard let self, self.id == id, !Task.isCancelled else {

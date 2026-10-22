@@ -6,6 +6,8 @@ struct PracticeView: View {
     @StateObject private var model = PracticeModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var fullscreen = false
+    @State private var showingSettings = false
+    @AppStorage(VideoCaptureSettings.key) private var frameRate = 60
 
     var body: some View {
         NavigationStack {
@@ -25,6 +27,27 @@ struct PracticeView: View {
                     }.padding()
                 }
             }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                        .accessibilityIdentifier("practice.settings").disabled(model.busy)
+                }
+            }
+            .sheet(isPresented: $showingSettings, onDismiss: { Task { await model.prepare() } }) {
+                NavigationStack {
+                    Form {
+                        Section {
+                            Picker("Frame rate", selection: $frameRate) {
+                                ForEach(VideoCaptureSettings.frameRates, id: \.self) { rate in Text("\(rate) fps").tag(rate) }
+                            }.pickerStyle(.navigationLink).accessibilityIdentifier("settings.frameRate")
+                        } header: { Text("Video recording") } footer: {
+                            Text("Applies to new recordings and delayed streams. Default: 60 fps. Camera support varies by device.")
+                        }
+                    }
+                    .navigationTitle("Settings")
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingSettings = false }.accessibilityIdentifier("settings.done") } }
+                }
+            }
             .navigationTitle("Replay")
             .navigationBarTitleDisplayMode(.inline)
             .task {
@@ -34,6 +57,7 @@ struct PracticeView: View {
                     model.setDelayedMode(true)
                     await model.startDelayedStream()
                 } else { await model.prepare() }
+                if ProcessInfo.processInfo.arguments.contains("--preview-settings") { showingSettings = true }
                 #else
                 await model.prepare()
                 #endif

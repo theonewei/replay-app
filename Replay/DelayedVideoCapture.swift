@@ -8,6 +8,8 @@ struct StreamUpdate: Sendable {
     let buffered: Double
     let measuredDelay: Double?
     let error: String?
+    var sourceTime: Double?
+    var isLive = false
 }
 
 /// A single-slot mailbox prevents capture from queuing images on a busy UI thread.
@@ -25,8 +27,8 @@ final class StreamMailbox: @unchecked Sendable {
 }
 
 protocol DelayedVideoCapturing: Sendable {
-    func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws
-    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip
+    func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws
+    func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip
     func stop(id: UUID) async
 }
 
@@ -40,11 +42,12 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
     private var buffer = DelayedFrameBuffer(delay: 15)
     private var mailbox: StreamMailbox?
     private var lastSample = -Double.infinity
+    private var frameRate = 60
     private var rotation: AVCaptureDevice.RotationCoordinator?
     private var rotationObservation: NSKeyValueObservation?
     private var observers: [NSObjectProtocol] = []
 
-    func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws {
+    func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws {
         guard await AVCaptureDevice.requestAccess(for: .video) else {
             throw PracticeError("Allow camera access in Settings to use delayed video.")
         }
@@ -67,7 +70,12 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                             guard self.session.canAddOutput(self.output) else { throw PracticeError("Delayed video is unavailable on this device.") }
                             self.session.addOutput(self.output)
                         }
-                        self.output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
+                        self.output.videoSettings = [
+                            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                            kCVPixelBufferWidthKey as String: 640, kCVPixelBufferHeightKey as String: 480
+                        ]
+                        try VideoCaptureSettings.configure(device, frameRate: frameRate, delayed: true)
+                        self.frameRate = frameRate
                         self.output.alwaysDiscardsLateVideoFrames = true
                         self.output.setSampleBufferDelegate(self, queue: self.queue)
                         let rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
@@ -118,7 +126,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let id = activeID else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
-        guard time.isFinite, time - lastSample >= 1.0 / 15.0 else { return }
+        guard time.isFinite, time - lastSample >= 0.9 / Double(frameRate) else { return }
         lastSample = time
         autoreleasepool {
             do {
@@ -128,8 +136,8 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                     throw PracticeError("The camera frame could not be prepared.")
                 }
                 let frame = try buffer.append(time: time, data: data)
-                mailbox?.put(StreamUpdate(data: frame?.data, buffered: buffer.buffered,
-                                          measuredDelay: frame.map { time - $0.time }, error: nil))
+                mailbox?.put(StreamUpdate(data: frame?.data ?? data, buffered: buffer.buffered,
+                                          measuredDelay: frame.map { time - $0.time }, error: nil, sourceTime: frame?.time, isLive: frame == nil))
             } catch {
                 fail("The delayed video buffer could not continue. Try a shorter delay or restart the stream.", id: id)
             }
@@ -153,7 +161,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
         }
     }
 
-    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip {
+    func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 guard self.activeID == id else {
@@ -161,12 +169,12 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                     return
                 }
                 do {
-                    let clip = try self.buffer.clip()
+                    let clip = try self.buffer.clip(endingAt: endingAt)
                     self.clear() // Capture has actually stopped before returning the snapshot.
                     continuation.resume(returning: clip)
                 } catch {
                     self.clear()
-                    continuation.resume(throwing: PracticeError("Wait for the selected delay to fill before clipping."))
+                    continuation.resume(throwing: PracticeError("Wait until the selected interval has been viewed before clipping."))
                 }
             }
         }

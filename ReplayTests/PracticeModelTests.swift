@@ -25,7 +25,11 @@ struct DelayedStreamTests {
         await started(model)
         let first = try #require(await driver.latestID)
         let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).jpegData(withCompressionQuality: 0.6) { _ in }
-        await driver.emit(first, update: StreamUpdate(data: image, buffered: 15, measuredDelay: 15.02, error: nil))
+        await driver.emit(first, update: StreamUpdate(data: image, buffered: 2, measuredDelay: nil, error: nil, isLive: true))
+        model.poll()
+        #expect(model.state == .buffering && model.isLive && model.image != nil)
+        #expect(!model.canClip && model.viewed == 0)
+        await driver.emit(first, update: StreamUpdate(data: image, buffered: 15, measuredDelay: 15.02, error: nil, sourceTime: 0))
         model.poll()
         #expect(model.state == .streaming)
         #expect(model.image != nil)
@@ -44,6 +48,29 @@ struct DelayedStreamTests {
         #expect(model.state == .failed("Interrupted"))
         #expect(!model.isRunning)
         #expect(model.image == nil)
+    }
+
+    @Test func sixtySecondDelayStartsWithLivePreviewAndResetsViewedHistoryAfterAGap() async throws {
+        let driver = ControlledStreamDriver()
+        let model = DelayedStreamModel(driver: driver)
+        defer { model.stop() }
+        model.delay = 60
+        await started(model)
+        let id = try #require(await driver.latestID)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).jpegData(withCompressionQuality: 0.6) { _ in }
+        await driver.emit(id, update: .init(data: image, buffered: 1, measuredDelay: nil, error: nil, isLive: true))
+        model.poll()
+        #expect(model.image != nil && model.isLive && !model.canClip)
+        for time in 0...60 {
+            await driver.emit(id, update: .init(data: image, buffered: 60, measuredDelay: 60, error: nil, sourceTime: Double(time)))
+            model.poll()
+        }
+        #expect(model.canClip && model.viewed == 60 && !model.isLive)
+        await driver.emit(id, update: .init(data: image, buffered: 60, measuredDelay: 60, error: nil, sourceTime: 63))
+        model.poll()
+        #expect(!model.canClip && model.viewed == 0)
+        model.stop()
+        #expect(model.viewed == 0 && !model.isLive)
     }
 
     @Test func stopDuringPreparationIgnoresLateStart() async throws {
@@ -79,7 +106,7 @@ private actor ControlledStreamDriver: DelayedVideoCapturing {
     private let fails: Bool
     private var continuation: CheckedContinuation<Void, Never>?
     init(entered: XCTestExpectation? = nil, fails: Bool = false) { self.entered = entered; self.fails = fails }
-    func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws {
+    func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws {
         latestID = id
         mailboxes[id] = mailbox
         if fails { throw PracticeError("Camera unavailable") }
@@ -89,7 +116,7 @@ private actor ControlledStreamDriver: DelayedVideoCapturing {
     }
     func releaseStart() { continuation?.resume(); continuation = nil }
     func emit(_ id: UUID, update: StreamUpdate) { mailboxes[id]?.put(update) }
-    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip { throw PracticeError("No test clip") }
+    func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip { throw PracticeError("No test clip") }
     func stop(id: UUID) async {}
 }
 
@@ -112,8 +139,10 @@ struct PracticeModelTests {
         let started = XCTestExpectation(description: "Stream buffering")
         let subscription = stream.$state.filter { $0 == .buffering }.prefix(1).sink { _ in started.fulfill() }
         #expect(await XCTWaiter.fulfillment(of: [started], timeout: 5) == .completed)
-        await driver.ready()
-        stream.poll()
+        for offset in 0...15 {
+            await driver.ready(time: 103 + Double(offset))
+            stream.poll()
+        }
         let failed = XCTestExpectation(description: "Clip failure is recoverable")
         let failure = stream.$state.filter { $0 == .failed("Encoding failed") }.prefix(1).sink { _ in failed.fulfill() }
         model.clipDelayedStream()

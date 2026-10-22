@@ -52,7 +52,7 @@ final class SystemCaptureDriver: NSObject, PracticeCapturing, AVAudioRecorderDel
             throw PracticeError("Allow camera access in Settings to record video.")
         }
         try Task.checkCancellation()
-        try await camera.prepare(position: position)
+        try await camera.prepare(position: position, frameRate: VideoCaptureSettings.frameRate())
     }
 
     func stopPreview() async { await camera.stopSession() }
@@ -155,7 +155,7 @@ final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
     private var stopRequested = false
     private var rotation: AVCaptureDevice.RotationCoordinator?
 
-    func prepare(position: AVCaptureDevice.Position) async throws {
+    func prepare(position: AVCaptureDevice.Position, frameRate: Int) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             queue.async {
                 do {
@@ -180,6 +180,7 @@ final class CameraRecorder: NSObject, AVCaptureFileOutputRecordingDelegate, @unc
                             guard self.session.canAddOutput(self.output) else { throw PracticeError("Cannot record video on this device.") }
                             self.session.addOutput(self.output)
                         }
+                        try VideoCaptureSettings.configure(device, frameRate: frameRate, delayed: false)
                         self.session.commitConfiguration()
                     } catch {
                         self.session.commitConfiguration()

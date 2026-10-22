@@ -23,8 +23,8 @@ struct DelayedFrameBuffer {
     private var firstTime: Double?
     private var lastTime: Double?
 
-    init(delay: Double, byteLimit: Int = 64 * 1024 * 1024, frameLimit: Int = 600) {
-        precondition(delay.isFinite && delay > 0 && delay <= 30)
+    init(delay: Double, byteLimit: Int = 256 * 1024 * 1024, frameLimit: Int = 7_500) {
+        precondition(delay.isFinite && delay > 0 && delay <= 60)
         self.delay = delay
         self.byteLimit = byteLimit
         self.frameLimit = frameLimit
@@ -39,24 +39,30 @@ struct DelayedFrameBuffer {
         lastTime = time
         buffered = min(delay, time - (firstTime ?? time))
         let target = time - delay
+        let retentionStart = time - 2 * delay - 3
         // Keep one predecessor at the left boundary. It supplies the exact
         // first frame of a clip when the chosen start falls between samples.
-        while frames.count > 1, frames[1].time <= target + 1e-9 {
+        while frames.count > 1, frames[1].time <= retentionStart + 1e-9 {
             bytes -= frames.removeFirst().data.count
         }
-        let selected = frames.first.flatMap { $0.time <= target + 1e-9 ? $0 : nil }
+        let selected = frames.last { $0.time <= target + 1e-9 }
         guard data.count <= byteLimit - bytes, frames.count < frameLimit else { throw BufferError.capacityExceeded }
         frames.append(Frame(time: time, data: data))
         bytes += data.count
         return selected
     }
 
-    func clip() throws -> Clip {
-        guard buffered >= delay - 1e-9, let lastTime,
-              let first = frames.first, first.time <= lastTime - delay + 1e-9 else {
+    /// The endpoint comes from the displayed frame, never from the capture head.
+    func clip(endingAt endTime: Double) throws -> Clip {
+        guard endTime.isFinite, let lastTime, endTime <= lastTime - delay + 1e-9,
+              let first = frames.first, first.time <= endTime - delay + 1e-9 else {
             throw BufferError.insufficientHistory
         }
-        return Clip(frames: frames, startTime: lastTime - delay, endTime: lastTime)
+        let start = endTime - delay
+        guard let predecessor = frames.lastIndex(where: { $0.time <= start + 1e-9 }) else {
+            throw BufferError.insufficientHistory
+        }
+        return Clip(frames: Array(frames[predecessor...].prefix { $0.time <= endTime + 1e-9 }), startTime: start, endTime: endTime)
     }
 
     mutating func reset() {

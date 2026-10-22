@@ -19,11 +19,11 @@ struct DelayedClipTests {
 
     static func fixture(delay: Double) throws -> DelayedFrameBuffer.Clip {
         var buffer = DelayedFrameBuffer(delay: delay)
-        for frame in 0...Int(delay + 3) {
-            let color: UIColor = frame < 3 ? .green : frame == 3 ? .red : .blue
+        for frame in 0...Int(2 * delay + 3) {
+            let color: UIColor = frame < 3 ? .green : frame == 3 ? .red : frame <= Int(delay + 3) ? .blue : .green
             _ = try buffer.append(time: 100 + Double(frame), data: jpeg(color))
         }
-        return try buffer.clip()
+        return try buffer.clip(endingAt: 103 + delay)
     }
 
     private func root() throws -> URL {
@@ -40,7 +40,7 @@ struct DelayedClipTests {
         withExtendedLifetime(subscription) {}
     }
 
-    @Test(arguments: [5.0, 15.0, 30.0]) func encodedClipHasExactWindowAndReadableFrames(delay: Double) async throws {
+    @Test(arguments: [5.0, 15.0, 30.0, 60.0]) func encodedClipHasExactWindowAndReadableFrames(delay: Double) async throws {
         let root = try root()
         defer { try? FileManager.default.removeItem(at: root) }
         let clip = try Self.fixture(delay: delay)
@@ -72,6 +72,18 @@ struct DelayedClipTests {
         return pixel.map(Int.init)
     }
 
+    @Test func encodedClipPreservesSixtyFramesPerSecond() async throws {
+        let root = try root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let data = Self.jpeg(.red)
+        let frames = (0..<300).map { DelayedFrameBuffer.Frame(time: Double($0) / 60, data: data) }
+        let clip = DelayedFrameBuffer.Clip(frames: frames, startTime: 0, endTime: 5)
+        let url = root.appendingPathComponent("sixty.mov")
+        try await DelayedClipEncoder().encode(clip, to: url)
+        let track = try #require(try await AVURLAsset(url: url).loadTracks(withMediaType: .video).first)
+        #expect(abs(try await track.load(.nominalFrameRate) - 60) < 0.1)
+    }
+
     @Test func invalidFramesLeaveNoPartialMovie() async throws {
         let root = try root()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -94,11 +106,15 @@ struct DelayedClipTests {
         await model.startDelayedStream()
         await wait(for: stream.$state, matching: { $0 == .buffering })
         #expect(!stream.canClip)
-        await driver.ready()
-        stream.poll()
+        for offset in 0...15 {
+            await driver.ready(time: 103 + Double(offset))
+            stream.poll()
+            #expect(stream.canClip == (offset == 15))
+        }
         #expect(stream.canClip)
         await wait(for: model.$session, matching: { $0.state == .paused }) { model.clipDelayedStream(); model.clipDelayedStream() }
         #expect(await driver.clipCount == 1)
+        #expect(await driver.requestedEndpoint == 118)
         #expect(await driver.active == false)
         #expect(model.reviewingDelayedClip)
         #expect(model.playback.isReady && !model.playback.isPlaying)
@@ -136,8 +152,11 @@ struct DelayedClipTests {
         var accepted = false
         stream.onClipReady = { _ in accepted = true; return true }
         await wait(for: stream.$state, matching: { $0 == .buffering }) { stream.start() }
-        await driver.ready()
-        stream.poll()
+        for offset in 0...15 {
+            await driver.ready(time: 103 + Double(offset))
+            stream.poll()
+            #expect(stream.canClip == (offset == 15))
+        }
         let url = root.appendingPathComponent("cancelled.mov")
         let operation = try #require(stream.makeClip(to: url))
         #expect(await XCTWaiter.fulfillment(of: [entered], timeout: 5) == .completed)
@@ -170,12 +189,13 @@ struct FailingClipEncoder: DelayedClipEncoding {
 actor ClipTestDriver: DelayedVideoCapturing {
     var active = false
     var clipCount = 0
+    var requestedEndpoint: Double?
     private let snapshot: DelayedFrameBuffer.Clip
     private var mailbox: StreamMailbox?
     init(clip: DelayedFrameBuffer.Clip) { snapshot = clip }
-    func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws { active = true; self.mailbox = mailbox }
-    func ready() { mailbox?.put(.init(data: snapshot.frames[0].data, buffered: snapshot.duration, measuredDelay: snapshot.duration, error: nil)) }
-    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip { active = false; clipCount += 1; return snapshot }
+    func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws { active = true; self.mailbox = mailbox }
+    func ready(time: Double) { mailbox?.put(.init(data: snapshot.frames[0].data, buffered: snapshot.duration, measuredDelay: snapshot.duration, error: nil, sourceTime: time)) }
+    func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip { active = false; clipCount += 1; requestedEndpoint = endingAt; return snapshot }
     func stop(id: UUID) async { active = false }
 }
 

@@ -9,7 +9,7 @@ protocol DelayedClipEncoding: Sendable {
 actor DelayedClipEncoder: DelayedClipEncoding {
     func encode(_ clip: DelayedFrameBuffer.Clip, to url: URL) async throws {
         guard !FileManager.default.fileExists(atPath: url.path),
-              clip.duration.isFinite, clip.duration > 0, clip.duration <= 30,
+              clip.duration.isFinite, clip.duration > 0, clip.duration <= 60,
               let first = clip.frames.first, first.time <= clip.startTime + 1e-9 else {
             throw PracticeError("The buffered clip is incomplete.")
         }
@@ -32,7 +32,7 @@ actor DelayedClipEncoder: DelayedClipEncoding {
         writer.add(input)
         guard writer.startWriting() else { throw writer.error ?? PracticeError("The video clip could not start.") }
         writer.startSession(atSourceTime: .zero)
-        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(120))
         var succeeded = false
         defer {
             if !succeeded {

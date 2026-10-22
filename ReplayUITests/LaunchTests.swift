@@ -1,6 +1,27 @@
 import XCTest
 
 final class LaunchTests: XCTestCase {
+    func testFrameRateSettingsPersistAcrossLaunches() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-capture"]
+        app.launch()
+        app.buttons["practice.settings"].tap()
+        app.buttons["settings.frameRate"].tap()
+        app.buttons["30 fps"].tap()
+        app.terminate()
+        app.launch()
+        app.buttons["practice.settings"].tap()
+        XCTAssertEqual(app.buttons["settings.frameRate"].value as? String, "30 fps")
+        app.buttons["settings.frameRate"].tap()
+        app.buttons["60 fps"].tap()
+        app.terminate()
+        app.launch()
+        app.buttons["practice.settings"].tap()
+        XCTAssertEqual(app.buttons["settings.frameRate"].value as? String, "60 fps")
+        app.buttons["settings.done"].tap()
+    }
+
     func testDelayedClipCanReviewSaveAndDiscard() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -12,8 +33,8 @@ final class LaunchTests: XCTestCase {
         let clip = app.buttons["stream.clip"]
         XCTAssertTrue(clip.waitForExistence(timeout: 5))
         let filled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: clip)
-        XCTAssertEqual(XCTWaiter.wait(for: [filled], timeout: 10), .completed)
-        XCTAssertEqual(clip.label, "Clip last 15 seconds")
+        XCTAssertEqual(XCTWaiter.wait(for: [filled], timeout: 20), .completed)
+        XCTAssertEqual(clip.label, "Clip last 15 seconds viewed")
         clip.tap()
         let done = app.buttons["video.done"]
         XCTAssertTrue(done.waitForExistence(timeout: 15))
@@ -84,6 +105,8 @@ final class LaunchTests: XCTestCase {
         XCTAssertTrue(startStop.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Delay: 15 seconds"].exists)
         startStop.tap()
+        XCTAssertTrue(app.staticTexts["stream.viewfinder"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["stream.clip"].isEnabled)
         let status = app.staticTexts["stream.status"]
         let streaming = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Streaming'"), object: status)
         XCTAssertEqual(XCTWaiter.wait(for: [streaming], timeout: 10), .completed)
@@ -173,7 +196,7 @@ final class LaunchTests: XCTestCase {
         app.buttons["practice.save"].tap()
         let cancel = app.buttons["Cancel"].firstMatch
         if !cancel.waitForExistence(timeout: 2) {
-            app.navigationBars.buttons.firstMatch.tap()
+            app.navigationBars.buttons.matching(NSPredicate(format: "identifier != 'practice.settings'")).firstMatch.tap()
         }
         XCTAssertTrue(cancel.waitForExistence(timeout: 5))
         cancel.tap()

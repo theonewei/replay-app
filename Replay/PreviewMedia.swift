@@ -101,13 +101,13 @@ actor FixtureDelayedVideoCapture: DelayedVideoCapturing {
     private var task: Task<Void, Never>?
     private var buffer: DelayedFrameBuffer?
 
-    func start(id: UUID, delay: Double, mailbox: StreamMailbox) async throws {
+    func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws {
         self.id = id
         buffer = DelayedFrameBuffer(delay: delay)
-        task = Task { [weak self] in await self?.produce(id: id, mailbox: mailbox) }
+        task = Task { [weak self] in await self?.produce(id: id, frameRate: frameRate, mailbox: mailbox) }
     }
 
-    private func produce(id: UUID, mailbox: StreamMailbox) async {
+    private func produce(id: UUID, frameRate: Int, mailbox: StreamMailbox) async {
         let began = ProcessInfo.processInfo.systemUptime
         let speed = ProcessInfo.processInfo.arguments.contains("--fast-stream") ? 5.0 : 1.0
         while self.id == id, !Task.isCancelled {
@@ -116,16 +116,16 @@ actor FixtureDelayedVideoCapture: DelayedVideoCapturing {
             guard self.id == id, !Task.isCancelled, buffer != nil else { return }
             do {
                 let frame = try buffer?.append(time: time, data: data)
-                mailbox.put(StreamUpdate(data: frame?.data, buffered: buffer?.buffered ?? 0,
-                                         measuredDelay: frame.map { time - $0.time }, error: nil))
+                mailbox.put(StreamUpdate(data: frame?.data ?? data, buffered: buffer?.buffered ?? 0,
+                                         measuredDelay: frame.map { time - $0.time }, error: nil, sourceTime: frame?.time, isLive: frame == nil))
             } catch { return }
-            try? await Task.sleep(for: .milliseconds(67))
+            try? await Task.sleep(for: .seconds(1.0 / Double(frameRate)))
         }
     }
 
-    func clip(id: UUID) async throws -> DelayedFrameBuffer.Clip {
+    func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip {
         guard self.id == id, let buffer else { throw PracticeError("The stream is no longer available.") }
-        let clip = try buffer.clip()
+        let clip = try buffer.clip(endingAt: endingAt)
         await stop(id: id)
         return clip
     }

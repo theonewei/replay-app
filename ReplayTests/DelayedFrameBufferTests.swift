@@ -7,24 +7,27 @@ import Testing
 #endif
 
 struct DelayedFrameBufferTests {
-    @Test(arguments: (5...30).map(Double.init)) func clipContainsOnlyTheLatestWindow(delay: Double) throws {
+    @Test(arguments: (5...60).map(Double.init)) func clipContainsOnlyTheViewedWindow(delay: Double) throws {
         var buffer = DelayedFrameBuffer(delay: delay)
-        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip() }
-        for frame in 0..<Int((delay + 3) * 15) {
+        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip(endingAt: 100 + delay + 3) }
+        for frame in 0...Int((2 * delay + 3) * 15) {
             _ = try buffer.append(time: 100 + Double(frame) / 15, data: Data([UInt8(frame % 256)]))
         }
-        let clip = try buffer.clip()
+        let clip = try buffer.clip(endingAt: 100 + delay + 3)
         #expect(abs(clip.duration - delay) < 0.00001)
         #expect(clip.frames.first?.time ?? .infinity <= clip.startTime + 1e-9)
         #expect(clip.frames[1].time > clip.startTime)
-        #expect(clip.frames.last?.time == clip.endTime)
+        #expect(clip.endTime == 100 + delay + 3)
+        #expect(clip.frames.allSatisfy { $0.time <= clip.endTime + 1e-9 })
+        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip(endingAt: 100 + 2 * delay + 3) }
+        #expect(abs((clip.frames.last?.time ?? 0) - clip.endTime) < 0.00001)
         #expect(clip.frames.count <= Int(delay * 15) + 2)
         buffer.reset()
-        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip() }
+        #expect(throws: DelayedFrameBuffer.BufferError.self) { try buffer.clip(endingAt: 100 + delay + 3) }
         #expect(!clip.frames.isEmpty) // Immutable snapshot survives capture cleanup.
     }
 
-    @Test(arguments: (5...30).map(Double.init)) func delayUsesCaptureTimeAndStaysBounded(delay: Double) throws {
+    @Test(arguments: (5...60).map(Double.init)) func delayUsesCaptureTimeAndStaysBounded(delay: Double) throws {
         var buffer = DelayedFrameBuffer(delay: delay)
         for frame in 0..<3_000 {
             let time = 100 + Double(frame) / 15
@@ -35,9 +38,23 @@ struct DelayedFrameBufferTests {
                 #expect(time - output.time < delay + 0.07)
                 #expect(output.data.first == UInt8(Int(((output.time - 100) * 15).rounded()) % 256))
             } else { #expect(output == nil) }
-            #expect(buffer.frames.count <= Int(delay * 15) + 2)
+            #expect(buffer.frames.count <= Int((2 * delay + 3) * 15) + 2)
             #expect(buffer.bytes == buffer.frames.count * 256)
         }
+    }
+
+    @Test(arguments: [24, 30, 60]) func sixtySecondBufferSupportsConfiguredFrameRates(rate: Int) throws {
+        var buffer = DelayedFrameBuffer(delay: 60)
+        var displayed: DelayedFrameBuffer.Frame?
+        for index in 0...rate * 125 {
+            displayed = try buffer.append(time: Double(index) / Double(rate), data: Data(repeating: 1, count: 64))
+        }
+        let endpoint = try #require(displayed).time
+        let clip = try buffer.clip(endingAt: endpoint)
+        #expect(abs(clip.duration - 60) < 0.00001)
+        #expect(clip.frames.count >= rate * 60)
+        #expect(buffer.frames.count <= rate * 123 + 2)
+        #expect(buffer.bytes <= buffer.byteLimit)
     }
 
     @Test func capacityFailureDoesNotExceedBudget() throws {
