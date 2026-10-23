@@ -42,6 +42,10 @@ struct PlaybackControllerTests {
         await reachedEnd(playback) {}
         #expect(!playback.isPlaying)
         #expect(playback.position == playback.duration)
+        // Let already-enqueued periodic updates run after the end notification.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(playback.position == playback.duration)
+        #expect(playback.hasFinished)
         // Replaying from the end seeks to zero and plays a second time.
         await reachedEnd(playback) { playback.play() }
         #expect(playback.position == playback.duration)

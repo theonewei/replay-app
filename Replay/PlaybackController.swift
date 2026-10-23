@@ -15,6 +15,7 @@ final class PlaybackController: ObservableObject {
     private var wantsToPlay = false
     private var isScrubbing = false
     private var isSeeking = false
+    private var reachedEnd = false
     private var generation = UUID()
     private var seekID = UUID()
     private var timeObserver: Any?
@@ -48,11 +49,13 @@ final class PlaybackController: ObservableObject {
         }
         timeObserver = next.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.1, preferredTimescale: 600), queue: .main
-        ) { [weak self] time in
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == generation,
-                      !self.isScrubbing, !self.isSeeking else { return }
-                self.position = self.clamped(time.seconds)
+                      !self.isScrubbing, !self.isSeeking, !self.reachedEnd else { return }
+                // Read the current time after hopping to the actor; an older tick
+                // must not overwrite a completed seek or the final position.
+                self.position = self.clamped(self.player?.currentTime().seconds ?? 0)
             }
         }
         endObserver = NotificationCenter.default.addObserver(
@@ -122,6 +125,7 @@ final class PlaybackController: ObservableObject {
     func seek(to seconds: Double) {
         guard isReady, let player else { return }
         let destination = clamped(seconds)
+        reachedEnd = false
         position = destination
         isSeeking = true
         let requestID = UUID()
@@ -136,6 +140,8 @@ final class PlaybackController: ObservableObject {
                 guard finished else { self.pause(); return }
                 if destination >= self.duration {
                     // Scrubbing to the end stops even when Loop is enabled.
+                    self.reachedEnd = true
+                    self.position = self.duration
                     self.pause()
                 } else if self.wantsToPlay, !self.isScrubbing,
                           UIApplication.shared.applicationState == .active {
@@ -150,6 +156,7 @@ final class PlaybackController: ObservableObject {
         if loopEnabled, UIApplication.shared.applicationState == .active {
             seek(to: 0)
         } else {
+            reachedEnd = true
             position = duration
             pause()
         }
@@ -181,6 +188,7 @@ final class PlaybackController: ObservableObject {
         wantsToPlay = false
         isScrubbing = false
         isSeeking = false
+        reachedEnd = false
         isPlaying = false
         isReady = false
         position = 0

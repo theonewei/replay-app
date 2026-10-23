@@ -7,6 +7,21 @@ import Testing
 #endif
 
 struct PracticeSessionTests {
+    @Test func discardOnlyRemovesTheMatchingIdleTake() {
+        var session = PracticeSession()
+        let take = UUID()
+        completeTake(&session, take: take)
+        #expect(session.handle(.discardTake(UUID())).isEmpty)
+        let export = UUID()
+        _ = session.handle(.export(export))
+        #expect(session.handle(.discardTake(take)).isEmpty)
+        #expect(session.takeID == take)
+        _ = session.handle(.exportFinished(export))
+        #expect(session.handle(.discardTake(take)) == [.replaceTake(take)])
+        #expect(session.state == .ready)
+        #expect(session.takeID == nil)
+    }
+
     private func completeTake(_ session: inout PracticeSession, take: UUID) {
         let operation = UUID()
         _ = session.handle(.record(operation))
@@ -114,5 +129,65 @@ struct PracticeSessionTests {
         _ = session.handle(.exportFinished(export))
         #expect(session.state == .paused)
         #expect(session.takeID == take)
+    }
+
+    @Test func interruptionStopsCaptureOnceAndNeverAutoplaysOnReturn() {
+        var session = PracticeSession()
+        let operation = UUID()
+        let take = UUID()
+        _ = session.handle(.record(operation))
+        _ = session.handle(.captureStarted(operation))
+        #expect(session.handle(.suspend) == [.stopCapture(operation)])
+        #expect(session.handle(.suspend).isEmpty)
+        _ = session.handle(.resume)
+        _ = session.handle(.captureFinished(operation, takeID: take))
+        #expect(session.handle(.playbackReady(operation)).isEmpty)
+        #expect(session.state == .paused)
+        #expect(session.handle(.play) == [.play(take)])
+    }
+
+    @Test func backgroundDuringPreparationCancelsAndPreservesTheOldTake() {
+        var session = PracticeSession()
+        let take = UUID()
+        completeTake(&session, take: take)
+        let operation = UUID()
+        _ = session.handle(.record(operation))
+        #expect(session.handle(.suspend) == [.cancelCapture(operation)])
+        #expect(session.handle(.captureStarted(operation)).isEmpty)
+        #expect(session.handle(.captureFinished(operation, takeID: UUID())).isEmpty)
+        #expect(session.takeID == take)
+        #expect(session.state == .paused)
+        #expect(!session.canRecord)
+        _ = session.handle(.resume)
+        #expect(session.canRecord)
+    }
+
+    @Test func playOnceCompletionAndPlaybackErrorsUpdateSessionState() {
+        var session = PracticeSession()
+        let take = UUID()
+        completeTake(&session, take: take)
+        #expect(session.handle(.playbackStopped(UUID())).isEmpty)
+        #expect(session.state == .replaying)
+        _ = session.handle(.playbackStopped(take))
+        #expect(session.state == .paused)
+        #expect(session.handle(.play) == [.play(take)])
+        #expect(session.handle(.playbackFailed(take, "Unreadable recording")) == [.pause(take)])
+        #expect(session.state == .recoverableError("Unreadable recording"))
+        #expect(session.takeID == take)
+    }
+
+    @Test func exportFailureRetainsTakeAndIgnoresLateCompletion() {
+        var session = PracticeSession()
+        let take = UUID()
+        completeTake(&session, take: take)
+        let export = UUID()
+        _ = session.handle(.export(export))
+        _ = session.handle(.failure(export, "Save failed"))
+        #expect(session.state == .recoverableError("Save failed"))
+        #expect(session.takeID == take)
+        #expect(session.handle(.exportFinished(export)).isEmpty)
+        _ = session.handle(.dismissError)
+        #expect(session.state == .paused)
+        #expect(!session.handle(.export(UUID())).isEmpty)
     }
 }
