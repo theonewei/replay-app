@@ -37,7 +37,14 @@ enum PreviewMedia {
         return url
     }
 
-    static func makeAudio(in folder: URL, duration: Double = 12) throws -> URL {
+    private static let audioAmplitudes: [Float] = [0, 0.003, 0.02, 0.15, 0.55, 0.06]
+    static func audioAmplitude(at time: Double) -> Float { audioAmplitudes[Int(max(0, time)) % audioAmplitudes.count] }
+    static func audioPower(at time: Double) -> Float {
+        let amplitude = audioAmplitude(at: time)
+        return amplitude > 0 ? 20 * log10(amplitude) - 3.0103 : -160
+    }
+
+    static func makeAudio(in folder: URL, duration: Double = 12, waveform: Bool = false) throws -> URL {
         let url = folder.appendingPathComponent("Preview-\(UUID().uuidString).wav")
         let file = try AVAudioFile(forWriting: url, settings: [
             AVFormatIDKey: kAudioFormatLinearPCM,
@@ -51,7 +58,12 @@ enum PreviewMedia {
             throw PracticeError("Could not create the preview recording.")
         }
         buffer.frameLength = frames
-        samples.update(repeating: 0, count: Int(frames))
+        if waveform {
+            for index in 0..<Int(frames) {
+                let time = Double(index) / 44_100
+                samples[index] = audioAmplitude(at: time) * Float(sin(2 * Double.pi * 220 * time))
+            }
+        } else { samples.update(repeating: 0, count: Int(frames)) }
         try file.write(from: buffer)
         return url
     }
@@ -66,6 +78,7 @@ final class FixtureCaptureDriver: PracticeCapturing {
     private var url: URL?
     private var finished: ((Result<URL, Error>) -> Void)?
     private var starts = 0
+    private var began: Double?
     func inputs(prepare: Bool) -> [AVAudioSessionPortDescription] { [] }
     func prepareVideo(position: AVCaptureDevice.Position) async throws {}
     func stopPreview() async {}
@@ -80,15 +93,21 @@ final class FixtureCaptureDriver: PracticeCapturing {
         self.id = id
         self.url = url
         self.finished = finished
+        began = ProcessInfo.processInfo.systemUptime
         started()
+    }
+    func audioPower(id: UUID) -> Float? {
+        guard self.id == id, let began, ProcessInfo.processInfo.arguments.contains("--fixture-waveform") else { return nil }
+        return PreviewMedia.audioPower(at: ProcessInfo.processInfo.systemUptime - began)
     }
     func stop(id: UUID) {
         guard self.id == id, let url else { return }
         let callback = finished
         self.id = nil
+        began = nil
         finished = nil
         do {
-            let fixture = try PreviewMedia.makeAudio(in: url.deletingLastPathComponent())
+            let fixture = try PreviewMedia.makeAudio(in: url.deletingLastPathComponent(), waveform: ProcessInfo.processInfo.arguments.contains("--fixture-waveform"))
             try FileManager.default.moveItem(at: fixture, to: url)
             callback?(.success(url))
         } catch { callback?(.failure(error)) }

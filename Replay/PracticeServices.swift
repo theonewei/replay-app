@@ -6,12 +6,17 @@ import UIKit
 protocol PracticeCapturing: AnyObject {
     var cameraSession: AVCaptureSession? { get }
     func inputs(prepare: Bool) -> [AVAudioSessionPortDescription]
+    func audioPower(id: UUID) -> Float?
     func prepareVideo(position: AVCaptureDevice.Position) async throws
     func stopPreview() async
     func start(id: UUID, mode: RecordingMode, url: URL, inputID: String?, position: AVCaptureDevice.Position,
                started: @escaping @MainActor () -> Void,
                finished: @escaping @MainActor (Result<URL, Error>) -> Void) async throws
     func stop(id: UUID)
+}
+
+extension PracticeCapturing {
+    func audioPower(id: UUID) -> Float? { nil }
 }
 
 @MainActor
@@ -87,6 +92,7 @@ final class SystemCaptureDriver: NSObject, PracticeCapturing, AVAudioRecorderDel
             do {
                 let next = try AVAudioRecorder(url: url, settings: RecordingFormat.settings(sampleRate: AVAudioSession.sharedInstance().sampleRate))
                 next.delegate = self
+                next.isMeteringEnabled = true
                 recorder = next
                 guard next.record() else { throw PracticeError("Recording could not start. Please try again.") }
                 started()
@@ -114,7 +120,16 @@ final class SystemCaptureDriver: NSObject, PracticeCapturing, AVAudioRecorderDel
 
     func stop(id: UUID) {
         guard activeID == id else { return }
-        if activeMode == .audio { recorder?.stop() } else { camera.stopRecording() }
+        if activeMode == .audio {
+            recorder?.isMeteringEnabled = false
+            recorder?.stop()
+        } else { camera.stopRecording() }
+    }
+
+    func audioPower(id: UUID) -> Float? {
+        guard activeID == id, activeMode == .audio, let recorder, recorder.isRecording, recorder.isMeteringEnabled else { return nil }
+        recorder.updateMeters()
+        return recorder.averagePower(forChannel: 0)
     }
 
     private func complete(id: UUID, result: Result<URL, Error>) {

@@ -192,6 +192,82 @@ struct PracticeModelTests {
         await waitFor(model, state: .replaying) { capture.finish() }
     }
 
+    @Test func waveformUsesConfirmedAudioCaptureAndRejectsStaleOrInvalidLevels() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let model = PracticeModel(capture: capture, storage: root)
+        await start(model, capture: capture)
+        let id = try #require(model.session.operationID)
+        capture.power = -15
+        model.pollAudioLevel(id: id)
+        #expect(model.audioWaveform.samples.isEmpty && capture.powerReads == 0)
+        capture.acknowledge()
+        capture.power = -160
+        model.pollAudioLevel(id: id)
+        capture.power = -45
+        model.pollAudioLevel(id: id)
+        capture.power = -15
+        model.pollAudioLevel(id: id)
+        #expect(model.audioWaveform.samples == [0, 0.25, 0.75])
+        capture.power = nil
+        model.pollAudioLevel(id: id)
+        capture.power = .nan
+        model.pollAudioLevel(id: id)
+        #expect(model.audioWaveform.samples.count == 3)
+        model.pollAudioLevel(id: UUID())
+        #expect(model.audioWaveform.samples.count == 3)
+        model.toggleRecording()
+        #expect(model.audioWaveform.samples.isEmpty)
+        capture.power = 0
+        model.pollAudioLevel(id: id)
+        #expect(model.audioWaveform.samples.isEmpty)
+        await waitFor(model, state: .replaying) { capture.finish() }
+        model.clearTake()
+        await start(model, capture: capture)
+        let nextID = try #require(model.session.operationID)
+        capture.acknowledge()
+        model.pollAudioLevel(id: id)
+        #expect(model.audioWaveform.samples.isEmpty)
+        model.pollAudioLevel(id: nextID)
+        #expect(model.audioWaveform.latest == 1)
+        model.suspend()
+        #expect(model.audioWaveform.samples.isEmpty)
+        model.pollAudioLevel(id: nextID)
+        #expect(model.audioWaveform.samples.isEmpty)
+    }
+
+    @Test func waveformNeverPollsForVideoAndResetsOnCaptureFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let capture = ControlledCapture()
+        let model = PracticeModel(capture: capture, storage: root)
+        model.mode = .video
+        await start(model, capture: capture)
+        let id = try #require(model.session.operationID)
+        capture.acknowledge()
+        capture.power = 0
+        model.pollAudioLevel(id: id)
+        #expect(model.audioWaveform.samples.isEmpty && capture.powerReads == 0)
+        let failure = XCTestExpectation(description: "Capture failure")
+        let subscription = model.$session.filter { $0.state == .recoverableError("Capture lost") }.prefix(1).sink { _ in failure.fulfill() }
+        capture.finished?(.failure(PracticeError("Capture lost")))
+        #expect(await XCTWaiter.fulfillment(of: [failure], timeout: 5) == .completed)
+        model.dismissError()
+        model.mode = .audio
+        await start(model, capture: capture)
+        let audioID = try #require(model.session.operationID)
+        capture.acknowledge()
+        model.pollAudioLevel(id: audioID)
+        #expect(model.audioWaveform.latest == 1)
+        let audioFailure = XCTestExpectation(description: "Audio capture failure")
+        let audioSubscription = model.$session.filter { $0.state == .recoverableError("Capture lost") }.prefix(1).sink { _ in audioFailure.fulfill() }
+        capture.finished?(.failure(PracticeError("Capture lost")))
+        #expect(await XCTWaiter.fulfillment(of: [audioFailure], timeout: 5) == .completed)
+        #expect(model.audioWaveform.samples.isEmpty)
+        withExtendedLifetime((subscription, audioSubscription)) {}
+    }
+
     @Test(arguments: [RecordingMode.audio, .video]) func clearStopsPlaybackDeletesOnlyTheTemporaryTakeAndAllowsRecording(mode: RecordingMode) async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -444,6 +520,8 @@ struct PracticeModelTests {
 private final class ControlledCapture: PracticeCapturing {
     var cameraSession: AVCaptureSession? { nil }
     var requestCount = 0
+    var power: Float?
+    var powerReads = 0
     var preparedPositions: [AVCaptureDevice.Position] = []
     var recordedPosition: AVCaptureDevice.Position?
     var stopCount = 0
@@ -467,6 +545,7 @@ private final class ControlledCapture: PracticeCapturing {
         self.finished = finished
         onRequest?()
     }
+    func audioPower(id: UUID) -> Float? { powerReads += 1; return power }
     func stop(id: UUID) { stopCount += 1 }
     func acknowledge() { started?() }
     func finish() {

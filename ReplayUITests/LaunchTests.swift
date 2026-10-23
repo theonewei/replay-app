@@ -1,6 +1,35 @@
 import XCTest
 
 final class LaunchTests: XCTestCase {
+    func testLiveAudioWaveformStopsResetsAndHandlesBackground() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--fixture-capture", "--fixture-waveform"]
+        app.launch()
+        let record = app.buttons["practice.record"]
+        record.tap()
+        let waveform = app.descendants(matching: .any).matching(identifier: "audio.waveform").firstMatch
+        XCTAssertTrue(waveform.waitForExistence(timeout: 5))
+        let sound = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value BEGINSWITH 'Input level'"), object: waveform)
+        XCTAssertEqual(XCTWaiter.wait(for: [sound], timeout: 5), .completed)
+        record.tap()
+        XCTAssertFalse(waveform.exists)
+        let clear = app.buttons["practice.clear"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 10))
+        let clearReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: clear)
+        XCTAssertEqual(XCTWaiter.wait(for: [clearReady], timeout: 10), .completed)
+        clear.tap()
+        let recordReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: record)
+        XCTAssertEqual(XCTWaiter.wait(for: [recordReady], timeout: 5), .completed)
+        record.tap()
+        let nextWaveform = app.descendants(matching: .any).matching(identifier: "audio.waveform").firstMatch
+        XCTAssertTrue(nextWaveform.waitForExistence(timeout: 5))
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertFalse(nextWaveform.exists)
+        XCTAssertEqual(record.label, "Record new take")
+    }
+
     func testClearAudioAndFullscreenVideoReturnsToReady() {
         continueAfterFailure = false
         for video in [false, true] {

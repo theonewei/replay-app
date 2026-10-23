@@ -11,14 +11,14 @@ let package = Package(
             name: "ReplayCore",
             path: "Replay",
             exclude: ["ReplayApp.swift", "PracticeView.swift", "PracticeModel.swift", "RecordingFormat.swift", "PlaybackController.swift", "PreviewMedia.swift", "PracticeServices.swift", "DelayedVideoCapture.swift", "DelayedStreamModel.swift", "DelayedStreamView.swift", "DelayedClipEncoder.swift"],
-            sources: ["PracticeSession.swift", "DelayedFrameBuffer.swift"]
+            sources: ["PracticeSession.swift", "DelayedFrameBuffer.swift", "AudioWaveform.swift"]
         ),
         .testTarget(
             name: "ReplayCoreTests",
             dependencies: ["ReplayCore"],
             path: "ReplayTests",
             exclude: ["RecordingFormatTests.swift", "PlaybackControllerTests.swift", "PracticeModelTests.swift", "DelayedClipTests.swift"],
-            sources: ["PracticeSessionTests.swift", "DelayedFrameBufferTests.swift"]
+            sources: ["PracticeSessionTests.swift", "DelayedFrameBufferTests.swift", "AudioWaveformTests.swift"]
         )
     ]
 )

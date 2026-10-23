@@ -20,6 +20,7 @@ final class PracticeModel: ObservableObject {
     typealias Mode = RecordingMode
     @Published private(set) var session = PracticeSession()
     @Published private(set) var take: RecordedTake?
+    @Published private(set) var audioWaveform = AudioWaveform()
     @Published private(set) var cameraReady = false
     @Published private(set) var inputs: [AVAudioSessionPortDescription] = []
     @Published private(set) var savedTakeID: UUID?
@@ -43,6 +44,8 @@ final class PracticeModel: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var position: AVCaptureDevice.Position = .back
     private var didLoadPreview = false
+    private var meterTimer: Timer?
+    private var meteringID: UUID?
 
     var mode: Mode {
         get { session.selectedMode }
@@ -246,8 +249,30 @@ final class PracticeModel: ObservableObject {
 
     private func send(_ event: PracticeSession.Event) {
         let effects = session.handle(event)
+        syncAudioMetering()
         UIApplication.shared.isIdleTimerDisabled = session.state == .recording || delayed.isRunning
         for effect in effects { perform(effect) }
+    }
+
+    private func syncAudioMetering() {
+        guard recording, mode == .audio, let id = session.operationID else {
+            meterTimer?.invalidate()
+            meterTimer = nil
+            meteringID = nil
+            if !audioWaveform.samples.isEmpty { audioWaveform.reset() }
+            return
+        }
+        guard meteringID != id else { return }
+        meteringID = id
+        audioWaveform.reset()
+        meterTimer = Timer.scheduledTimer(withTimeInterval: AudioWaveform.sampleInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.pollAudioLevel(id: id) }
+        }
+    }
+
+    func pollAudioLevel(id: UUID) {
+        guard recording, mode == .audio, session.operationID == id, let power = capture.audioPower(id: id) else { return }
+        audioWaveform.append(decibels: power)
     }
 
     private func perform(_ effect: PracticeSession.Effect) {
@@ -420,6 +445,7 @@ final class PracticeModel: ObservableObject {
     }
 
     isolated deinit {
+        meterTimer?.invalidate()
         startTask?.cancel()
         previewTask?.cancel()
         if let id = session.operationID { capture.stop(id: id) }

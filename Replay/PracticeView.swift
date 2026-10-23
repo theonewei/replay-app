@@ -58,6 +58,7 @@ struct PracticeView: View {
                     await model.startDelayedStream()
                 } else { await model.prepare() }
                 if ProcessInfo.processInfo.arguments.contains("--preview-settings") { showingSettings = true }
+                if ProcessInfo.processInfo.arguments.contains("--preview-recording"), ProcessInfo.processInfo.arguments.contains("--fixture-capture") { model.toggleRecording() }
                 #else
                 await model.prepare()
                 #endif
@@ -134,6 +135,12 @@ struct PracticeView: View {
                     }
                     if !model.playback.isReady { ProgressView("Preparing replay") }
                 }
+            } else if model.mode == .audio, model.recording {
+                VStack(spacing: 16) {
+                    Text("Recording").font(.title3).foregroundStyle(.red)
+                    RecordingWaveformView(waveform: model.audioWaveform).frame(maxWidth: .infinity, maxHeight: 260)
+                    Text("Stop to hear your take.").font(.subheadline).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.mode == .video, model.cameraReady, let camera = model.cameraSession {
                 CameraPreview(session: camera)
             } else {
