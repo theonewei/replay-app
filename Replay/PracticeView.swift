@@ -52,10 +52,11 @@ struct PracticeView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--preview-stream") {
+                if ProcessInfo.processInfo.arguments.contains("--preview-stream") || ProcessInfo.processInfo.arguments.contains("--preview-viewfinder") {
                     model.mode = .video
                     model.setDelayedMode(true)
-                    await model.startDelayedStream()
+                    if ProcessInfo.processInfo.arguments.contains("--preview-viewfinder") { await model.prepare() }
+                    else { await model.startDelayedStream() }
                 } else { await model.prepare() }
                 if ProcessInfo.processInfo.arguments.contains("--preview-settings") { showingSettings = true }
                 if ProcessInfo.processInfo.arguments.contains("--preview-recording"), ProcessInfo.processInfo.arguments.contains("--fixture-capture") { model.toggleRecording() }
@@ -171,7 +172,7 @@ struct PracticeView: View {
                         .disabled(model.busy).accessibilityIdentifier("stream.discardClip")
                 }.frame(minHeight: 44)
             }
-            DelayedStreamControls(stream: model.delayed, start: { Task { await model.startDelayedStream() } }, clip: model.clipDelayedStream)
+            DelayedStreamControls(stream: model.delayed, start: { Task { await model.startDelayedStream() } }, stop: model.stopDelayedStream, clip: model.clipDelayedStream)
                 .disabled(model.session.state == .exporting)
         } else {
             if model.player != nil {

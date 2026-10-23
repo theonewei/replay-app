@@ -4,7 +4,7 @@ import UIKit
 
 @MainActor
 final class DelayedStreamModel: ObservableObject {
-    enum State: Equatable { case stopped, starting, buffering, streaming, finishing, reviewing, failed(String) }
+    enum State: Equatable { case stopped, previewing, starting, buffering, streaming, finishing, reviewing, failed(String) }
     @Published private(set) var state: State = .stopped
     @Published private(set) var image: UIImage?
     @Published private(set) var buffered = 0.0
@@ -14,6 +14,7 @@ final class DelayedStreamModel: ObservableObject {
     @Published private(set) var isLive = false
     private var viewedStart: Double?
     private var viewedEnd: Double?
+    var isPreviewing: Bool { state == .previewing }
     var isRunning: Bool { state == .starting || state == .buffering || state == .streaming }
     var isBusy: Bool { isRunning || state == .finishing }
     var canClip: Bool { state == .streaming && viewed >= Double(delay) - 0.001 }
@@ -24,6 +25,8 @@ final class DelayedStreamModel: ObservableObject {
     private var id: UUID?
     private var timer: Timer?
     private var task: Task<Void, Never>?
+    private var cleanup: Task<Void, Never>?
+    private var previewFrameRate: Int?
     private var lastUpdate = ProcessInfo.processInfo.systemUptime
 
     init(driver: (any DelayedVideoCapturing)? = nil, encoder: any DelayedClipEncoding = DelayedClipEncoder()) {
@@ -35,29 +38,51 @@ final class DelayedStreamModel: ObservableObject {
         #endif
     }
 
+    func preview() {
+        guard !isBusy, state != .reviewing else { return }
+        if isPreviewing, previewFrameRate == VideoCaptureSettings.frameRate() { return }
+        begin(preview: true)
+    }
+
     func start() {
         guard !isBusy, (5...60).contains(delay) else { return }
+        begin(preview: false)
+    }
+
+    private func begin(preview: Bool) {
+        let oldID = id
+        let previousTask = task
+        let previousCleanup = cleanup
+        previousTask?.cancel()
+        timer?.invalidate()
+        timer = nil
         let id = UUID()
         self.id = id
         mailbox = StreamMailbox()
         let mailbox = self.mailbox
-        state = .starting
-        UIApplication.shared.isIdleTimerDisabled = true
-        image = nil
+        state = preview ? .previewing : .starting
+        UIApplication.shared.isIdleTimerDisabled = !preview
+        if !isLive { image = nil }
         buffered = 0
         measuredDelay = nil
         viewed = 0
         viewedStart = nil
         viewedEnd = nil
-        isLive = false
+        isLive = image != nil
         let driver = self.driver
         let seconds = Double(delay)
         let frameRate = VideoCaptureSettings.frameRate()
+        previewFrameRate = preview ? frameRate : nil
         task = Task { [weak self] in
+            await previousCleanup?.value
+            await previousTask?.value
+            if let oldID { await driver.stop(id: oldID) }
             do {
-                try await driver.start(id: id, delay: seconds, frameRate: frameRate, mailbox: mailbox)
+                try Task.checkCancellation()
+                if preview { try await driver.preview(id: id, frameRate: frameRate, mailbox: mailbox) }
+                else { try await driver.start(id: id, delay: seconds, frameRate: frameRate, mailbox: mailbox) }
                 guard let self, self.id == id, !Task.isCancelled else { await driver.stop(id: id); return }
-                self.state = .buffering
+                self.state = preview ? .previewing : .buffering
                 self.lastUpdate = ProcessInfo.processInfo.systemUptime
                 self.timer = Timer.scheduledTimer(withTimeInterval: 1.0 / Double(frameRate), repeats: true) { [weak self] _ in
                     Task { @MainActor [weak self] in self?.poll(id: id) }
@@ -71,7 +96,7 @@ final class DelayedStreamModel: ObservableObject {
     }
 
     func poll(id: UUID? = nil) {
-        guard isRunning, id == nil || self.id == id else { return }
+        guard isRunning || isPreviewing, id == nil || self.id == id else { return }
         guard let update = mailbox.take() else {
             if ProcessInfo.processInfo.systemUptime - lastUpdate > 3 {
                 stop()
@@ -81,13 +106,14 @@ final class DelayedStreamModel: ObservableObject {
         }
         lastUpdate = ProcessInfo.processInfo.systemUptime
         if let error = update.error { stop(); state = .failed(error); return }
-        buffered = update.buffered
-        measuredDelay = update.measuredDelay
+        buffered = isPreviewing ? 0 : update.buffered
+        measuredDelay = isPreviewing ? nil : update.measuredDelay
         if let data = update.data, let image = UIImage(data: data) {
             self.image = image
             isLive = update.isLive
-            if update.isLive {
-                state = .buffering
+            if update.isLive || isPreviewing {
+                isLive = true
+                state = isPreviewing ? .previewing : .buffering
                 viewedStart = nil
                 viewedEnd = nil
                 viewed = 0
@@ -107,6 +133,8 @@ final class DelayedStreamModel: ObservableObject {
 
     func stop() {
         let oldID = id
+        let previousTask = task
+        let previousCleanup = cleanup
         id = nil
         timer?.invalidate()
         timer = nil
@@ -122,7 +150,11 @@ final class DelayedStreamModel: ObservableObject {
         state = .stopped
         UIApplication.shared.isIdleTimerDisabled = false
         let driver = self.driver
-        if let oldID { Task { await driver.stop(id: oldID) } }
+        cleanup = Task {
+            await previousCleanup?.value
+            await previousTask?.value
+            if let oldID { await driver.stop(id: oldID) }
+        }
     }
 
     @discardableResult

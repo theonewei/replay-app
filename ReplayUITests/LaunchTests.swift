@@ -155,6 +155,11 @@ final class LaunchTests: XCTestCase {
         let startStop = app.buttons["stream.startStop"]
         XCTAssertTrue(startStop.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Delay: 15 seconds"].exists)
+        let preview = app.staticTexts["stream.preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertEqual(startStop.label, "Start stream")
+        XCTAssertTrue(app.steppers["stream.delay"].isEnabled)
+        XCTAssertFalse(app.buttons["stream.clip"].exists)
         startStop.tap()
         XCTAssertTrue(app.staticTexts["stream.viewfinder"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["stream.clip"].isEnabled)
@@ -167,6 +172,7 @@ final class LaunchTests: XCTestCase {
         XCTAssertEqual(startStop.label, "Start stream")
         XCTAssertTrue(app.steppers["stream.delay"].isEnabled)
         XCTAssertFalse(app.images["Delayed camera video"].exists)
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
         startStop.tap()
         XCTAssertTrue(status.label.contains("Starting") || status.label.contains("Buffering"))
         let restarted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Streaming'"), object: status)
@@ -174,6 +180,9 @@ final class LaunchTests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertEqual(startStop.label, "Start stream")
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        app.buttons["Audio"].tap()
+        XCTAssertFalse(preview.exists)
     }
 
     func testLaunchShowsPracticeControls() {

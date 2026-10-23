@@ -27,6 +27,7 @@ final class StreamMailbox: @unchecked Sendable {
 }
 
 protocol DelayedVideoCapturing: Sendable {
+    func preview(id: UUID, frameRate: Int, mailbox: StreamMailbox) async throws
     func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws
     func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip
     func stop(id: UUID) async
@@ -39,7 +40,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
     private let output = AVCaptureVideoDataOutput()
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var activeID: UUID?
-    private var buffer = DelayedFrameBuffer(delay: 15)
+    private var buffer: DelayedFrameBuffer?
     private var mailbox: StreamMailbox?
     private var lastSample = -Double.infinity
     private var frameRate = 60
@@ -47,7 +48,15 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
     private var rotationObservation: NSKeyValueObservation?
     private var observers: [NSObjectProtocol] = []
 
+    func preview(id: UUID, frameRate: Int, mailbox: StreamMailbox) async throws {
+        try await begin(id: id, delay: nil, frameRate: frameRate, mailbox: mailbox)
+    }
+
     func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws {
+        try await begin(id: id, delay: delay, frameRate: frameRate, mailbox: mailbox)
+    }
+
+    private func begin(id: UUID, delay: Double?, frameRate: Int, mailbox: StreamMailbox) async throws {
         guard await AVCaptureDevice.requestAccess(for: .video) else {
             throw PracticeError("Allow camera access in Settings to use delayed video.")
         }
@@ -91,7 +100,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                         throw error
                     }
                     self.activeID = id
-                    self.buffer = DelayedFrameBuffer(delay: delay)
+                    self.buffer = delay.map { DelayedFrameBuffer(delay: $0) }
                     self.mailbox = mailbox
                     self.lastSample = -.infinity
                     for name in [AVCaptureSession.runtimeErrorNotification, AVCaptureSession.wasInterruptedNotification] {
@@ -135,8 +144,8 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                         options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.65]) else {
                     throw PracticeError("The camera frame could not be prepared.")
                 }
-                let frame = try buffer.append(time: time, data: data)
-                mailbox?.put(StreamUpdate(data: frame?.data ?? data, buffered: buffer.buffered,
+                let frame = try buffer?.append(time: time, data: data)
+                mailbox?.put(StreamUpdate(data: frame?.data ?? data, buffered: buffer?.buffered ?? 0,
                                           measuredDelay: frame.map { time - $0.time }, error: nil, sourceTime: frame?.time, isLive: frame == nil))
             } catch {
                 fail("The delayed video buffer could not continue. Try a shorter delay or restart the stream.", id: id)
@@ -169,7 +178,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
                     return
                 }
                 do {
-                    let clip = try self.buffer.clip(endingAt: endingAt)
+                    guard let clip = try self.buffer?.clip(endingAt: endingAt) else { throw DelayedFrameBuffer.BufferError.insufficientHistory }
                     self.clear() // Capture has actually stopped before returning the snapshot.
                     continuation.resume(returning: clip)
                 } catch {
@@ -189,7 +198,7 @@ final class DelayedVideoCapture: NSObject, DelayedVideoCapturing, AVCaptureVideo
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers.removeAll()
         for input in session.inputs { session.removeInput(input) }
-        buffer.reset()
+        buffer = nil
         mailbox = nil
         context.clearCaches()
     }

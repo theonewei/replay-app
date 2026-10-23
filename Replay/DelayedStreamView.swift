@@ -11,7 +11,7 @@ struct DelayedStreamSurface: View {
             } else {
                 VStack(spacing: 16) {
                     Image(systemName: "video.badge.waveform").font(.largeTitle)
-                    Text(stream.isRunning ? "Filling video delay" : "Delayed video").font(.title2)
+                    Text(stream.isPreviewing ? "Starting viewfinder" : stream.isRunning ? "Filling video delay" : "Delayed video").font(.title2)
                     if stream.isRunning {
                         ProgressView(value: stream.buffered, total: Double(stream.delay))
                         Text("\(Int(stream.buffered)) of \(stream.delay) seconds")
@@ -22,9 +22,13 @@ struct DelayedStreamSurface: View {
                 VStack {
                     Spacer()
                     VStack(spacing: 8) {
-                        Text("Live viewfinder · Filling delay").accessibilityIdentifier("stream.viewfinder")
-                        ProgressView(value: stream.buffered, total: Double(stream.delay)).tint(.white)
-                        Text("\(Int(stream.buffered)) / \(stream.delay) seconds")
+                        if stream.isPreviewing {
+                            Text("Live viewfinder · Tap Start stream").accessibilityIdentifier("stream.preview")
+                        } else {
+                            Text("Live viewfinder · Filling delay").accessibilityIdentifier("stream.viewfinder")
+                            ProgressView(value: stream.buffered, total: Double(stream.delay)).tint(.white)
+                            Text("\(Int(stream.buffered)) / \(stream.delay) seconds")
+                        }
                     }.font(.footnote).padding().background(.black.opacity(0.65))
                 }.foregroundStyle(.white)
             }
@@ -41,6 +45,7 @@ struct DelayedStreamSurface: View {
 struct DelayedStreamControls: View {
     @ObservedObject var stream: DelayedStreamModel
     let start: () -> Void
+    let stop: () -> Void
     let clip: () -> Void
 
     var body: some View {
@@ -49,7 +54,7 @@ struct DelayedStreamControls: View {
                 .disabled(stream.isBusy)
                 .accessibilityIdentifier("stream.delay")
             Button(stream.isRunning ? "Stop stream" : "Start stream", systemImage: stream.isRunning ? "stop.fill" : "video.fill") {
-                if stream.isRunning { stream.stop() } else { start() }
+                if stream.isRunning { stop() } else { start() }
             }
             .buttonStyle(.borderedProminent)
             .tint(stream.isRunning ? .red : .accentColor)
@@ -65,6 +70,7 @@ struct DelayedStreamControls: View {
             }
             Group {
                 switch stream.state {
+                case .previewing: Text("Live preview · Set delay, then Start stream")
                 case .starting: Text("Starting camera…")
                 case .buffering: Text("Buffering · \(Int(stream.buffered)) / \(stream.delay) seconds")
                 case .streaming:

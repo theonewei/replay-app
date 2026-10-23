@@ -120,9 +120,17 @@ actor FixtureDelayedVideoCapture: DelayedVideoCapturing {
     private var task: Task<Void, Never>?
     private var buffer: DelayedFrameBuffer?
 
+    func preview(id: UUID, frameRate: Int, mailbox: StreamMailbox) async throws {
+        begin(id: id, delay: nil, frameRate: frameRate, mailbox: mailbox)
+    }
+
     func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws {
+        begin(id: id, delay: delay, frameRate: frameRate, mailbox: mailbox)
+    }
+
+    private func begin(id: UUID, delay: Double?, frameRate: Int, mailbox: StreamMailbox) {
         self.id = id
-        buffer = DelayedFrameBuffer(delay: delay)
+        buffer = delay.map { DelayedFrameBuffer(delay: $0) }
         task = Task { [weak self] in await self?.produce(id: id, frameRate: frameRate, mailbox: mailbox) }
     }
 
@@ -132,7 +140,7 @@ actor FixtureDelayedVideoCapture: DelayedVideoCapturing {
         while self.id == id, !Task.isCancelled {
             let time = (ProcessInfo.processInfo.systemUptime - began) * speed
             let data = await Self.image(time: time)
-            guard self.id == id, !Task.isCancelled, buffer != nil else { return }
+            guard self.id == id, !Task.isCancelled else { return }
             do {
                 let frame = try buffer?.append(time: time, data: data)
                 mailbox.put(StreamUpdate(data: frame?.data ?? data, buffered: buffer?.buffered ?? 0,

@@ -73,6 +73,41 @@ struct DelayedStreamTests {
         #expect(model.viewed == 0 && !model.isLive)
     }
 
+    @Test func idleViewfinderDoesNotBufferAndStartRejectsStalePreviewFrames() async throws {
+        let entered = XCTestExpectation(description: "Live preview started")
+        let driver = ControlledStreamDriver(previewEntered: entered)
+        let model = DelayedStreamModel(driver: driver)
+        defer { model.stop() }
+        model.preview()
+        #expect(await XCTWaiter.fulfillment(of: [entered], timeout: 5) == .completed)
+        let previewID = try #require(await driver.latestID)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).jpegData(withCompressionQuality: 0.6) { _ in }
+        await driver.emit(previewID, update: .init(data: image, buffered: 60, measuredDelay: 60, error: nil, sourceTime: 60, isLive: true))
+        model.poll()
+        #expect(model.isPreviewing && model.image != nil && model.isLive)
+        #expect(!model.isRunning && !model.isBusy && !model.canClip)
+        #expect(model.buffered == 0 && model.viewed == 0 && model.measuredDelay == nil)
+        await started(model)
+        let streamID = try #require(await driver.latestID)
+        #expect(streamID != previewID)
+        await driver.emit(previewID, update: .init(data: nil, buffered: 0, measuredDelay: nil, error: "Stale preview"))
+        model.poll()
+        #expect(model.state == .buffering && model.buffered == 0 && !model.canClip)
+        await driver.emit(streamID, update: .init(data: image, buffered: 1, measuredDelay: nil, error: nil, isLive: true))
+        model.poll()
+        #expect(model.state == .buffering && model.buffered == 1 && !model.canClip)
+        model.stop()
+        #expect(model.image == nil && !model.isPreviewing)
+    }
+
+    @Test func previewSourceCannotProduceAClipBeforeStart() async throws {
+        let driver = FixtureDelayedVideoCapture()
+        let id = UUID()
+        try await driver.preview(id: id, frameRate: 60, mailbox: StreamMailbox())
+        await #expect(throws: (any Error).self) { try await driver.clip(id: id, endingAt: 60) }
+        await driver.stop(id: id)
+    }
+
     @Test func stopDuringPreparationIgnoresLateStart() async throws {
         let entered = XCTestExpectation(description: "Driver start is pending")
         let driver = ControlledStreamDriver(entered: entered)
@@ -103,9 +138,11 @@ private actor ControlledStreamDriver: DelayedVideoCapturing {
     var latestID: UUID?
     private var mailboxes: [UUID: StreamMailbox] = [:]
     private let entered: XCTestExpectation?
+    private let previewEntered: XCTestExpectation?
     private let fails: Bool
     private var continuation: CheckedContinuation<Void, Never>?
-    init(entered: XCTestExpectation? = nil, fails: Bool = false) { self.entered = entered; self.fails = fails }
+    init(entered: XCTestExpectation? = nil, fails: Bool = false, previewEntered: XCTestExpectation? = nil) { self.entered = entered; self.fails = fails; self.previewEntered = previewEntered }
+    func preview(id: UUID, frameRate: Int, mailbox: StreamMailbox) async throws { latestID = id; mailboxes[id] = mailbox; previewEntered?.fulfill() }
     func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws {
         latestID = id
         mailboxes[id] = mailbox

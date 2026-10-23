@@ -51,7 +51,7 @@ final class PracticeModel: ObservableObject {
         get { session.selectedMode }
         set {
             guard !busy else { return }
-            if newValue == .audio { isDelayedMode = false }
+            if newValue == .audio { delayed.stop(); isDelayedMode = false }
             send(.selectMode(newValue))
             Task { await prepare() }
         }
@@ -136,7 +136,12 @@ final class PracticeModel: ObservableObject {
         previewTask = Task { [weak self] in
             guard let self else { return }
             do {
-                if mode == .video && self.take?.mode != .video && !self.isDelayedMode {
+                if mode == .video && self.isDelayedMode {
+                    await self.capture.stopPreview()
+                    guard !Task.isCancelled, self.previewGeneration == generation, self.session.isActive else { return }
+                    self.cameraReady = false
+                    self.delayed.preview()
+                } else if mode == .video && self.take?.mode != .video {
                     try await self.capture.prepareVideo(position: self.position)
                     guard !Task.isCancelled, self.previewGeneration == generation, self.session.canChangeMode else { return }
                     self.cameraReady = true
@@ -177,6 +182,7 @@ final class PracticeModel: ObservableObject {
     func setDelayedMode(_ enabled: Bool) {
         guard mode == .video, !busy else { return }
         send(.pause)
+        if !enabled { delayed.stop() }
         isDelayedMode = enabled
         Task { await prepare() }
     }
@@ -184,9 +190,18 @@ final class PracticeModel: ObservableObject {
     func startDelayedStream() async {
         guard mode == .video, isDelayedMode, session.canChangeMode, !delayed.isBusy else { return }
         send(.pause)
-        await prepare()
-        guard mode == .video, isDelayedMode, session.canChangeMode, UIApplication.shared.applicationState == .active else { return }
+        previewTask?.cancel()
+        previewGeneration = UUID()
+        cameraReady = false
+        await capture.stopPreview()
+        guard mode == .video, isDelayedMode, session.canChangeMode, session.isActive, !delayed.isBusy,
+              UIApplication.shared.applicationState == .active else { return }
         delayed.start()
+    }
+
+    func stopDelayedStream() {
+        delayed.stop()
+        Task { await prepare() }
     }
 
     func clipDelayedStream() {
@@ -410,7 +425,7 @@ final class PracticeModel: ObservableObject {
     }
 
     func suspend() {
-        if delayed.isBusy { delayed.stop() }
+        if delayed.isBusy || delayed.isPreviewing { delayed.stop() }
         previewTask?.cancel()
         previewGeneration = UUID()
         send(.suspend)

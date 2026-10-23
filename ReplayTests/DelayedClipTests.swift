@@ -198,6 +198,7 @@ actor ClipTestDriver: DelayedVideoCapturing {
     private let snapshot: DelayedFrameBuffer.Clip
     private var mailbox: StreamMailbox?
     init(clip: DelayedFrameBuffer.Clip) { snapshot = clip }
+    func preview(id: UUID, frameRate: Int, mailbox: StreamMailbox) async throws { active = true; self.mailbox = mailbox }
     func start(id: UUID, delay: Double, frameRate: Int, mailbox: StreamMailbox) async throws { active = true; self.mailbox = mailbox }
     func ready(time: Double) { mailbox?.put(.init(data: snapshot.frames[0].data, buffered: snapshot.duration, measuredDelay: snapshot.duration, error: nil, sourceTime: time)) }
     func clip(id: UUID, endingAt: Double) async throws -> DelayedFrameBuffer.Clip { active = false; clipCount += 1; requestedEndpoint = endingAt; return snapshot }
